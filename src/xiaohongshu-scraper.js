@@ -10,6 +10,7 @@ const { chromium } = require('playwright');
 const fs = require('fs-extra');
 const path = require('path');
 const { URL } = require('url');
+const sharp = require('sharp');
 
 /**
  * 小红书餐馆图片下载器类
@@ -32,7 +33,9 @@ class XiaohongshuScraper {
             headless: options.headless !== undefined ? options.headless : false,
             delay: options.delay || 1000,
             timeout: options.timeout || 30000,
-            userAgent: options.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            userAgent: options.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            tryRemoveWatermark: options.tryRemoveWatermark !== undefined ? options.tryRemoveWatermark : true,
+            enableImageProcessing: options.enableImageProcessing !== undefined ? options.enableImageProcessing : true
         };
         
         // 登录配置
@@ -771,10 +774,31 @@ class XiaohongshuScraper {
                 hasLoginElements: loginInfo.hasLoginElements
             });
             
-            // 判断是否已登录
-            const isLoggedIn = loginInfo.hasUserElements && !loginInfo.hasLoginElements;
+            // 更严格的登录状态判断
+            // 如果页面显示"登录后查看搜索结果"，说明未登录
+            const hasLoginPrompt = loginInfo.bodyText.includes('登录后查看搜索结果') || 
+                                  loginInfo.bodyText.includes('扫码登录') ||
+                                  loginInfo.bodyText.includes('手机号登录');
+            
+            // 如果URL包含登录相关路径，说明未登录
+            const isOnLoginPage = loginInfo.currentUrl.includes('login') || 
+                                 loginInfo.currentUrl.includes('signin');
+            
+            // 综合判断：有用户元素 + 没有登录元素 + 没有登录提示 + 不在登录页面
+            const isLoggedIn = loginInfo.hasUserElements && 
+                              !loginInfo.hasLoginElements && 
+                              !hasLoginPrompt && 
+                              !isOnLoginPage;
             
             console.log(`✅ 登录状态: ${isLoggedIn ? '已登录' : '未登录'}`);
+            if (!isLoggedIn) {
+                console.log(`📊 登录检测详情:`, {
+                    hasUserElements: loginInfo.hasUserElements,
+                    hasLoginElements: loginInfo.hasLoginElements,
+                    hasLoginPrompt: hasLoginPrompt,
+                    isOnLoginPage: isOnLoginPage
+                });
+            }
             
             return isLoggedIn;
             
@@ -960,14 +984,16 @@ class XiaohongshuScraper {
                                 if (isLargeEnough && isNotAvatar && isNotSystem && isNotEmoji && isNotAd && isInContentArea) {
                                     let imageUrl = img.src;
                                     
-                                    // 优化图片URL，获取更高质量的图片
-                                    if (imageUrl.includes('thumbnail') || imageUrl.includes('thumb')) {
-                                        imageUrl = imageUrl.replace(/thumbnail|thumb/g, 'original');
+                                    // 根据配置优化图片URL，尝试获取无水印的原图
+                                    if (this.config.tryRemoveWatermark) {
+                                        imageUrl = this.optimizeImageUrlForWatermarkRemoval(imageUrl);
+                                    } else {
+                                        // 只做基本的URL优化
+                                        if (imageUrl.includes('thumbnail') || imageUrl.includes('thumb')) {
+                                            imageUrl = imageUrl.replace(/thumbnail|thumb/g, 'original');
+                                        }
+                                        imageUrl = imageUrl.replace(/[?&]w=\d+/g, '').replace(/[?&]h=\d+/g, '');
                                     }
-                                    
-                                    // 移除尺寸限制参数，获取原图
-                                    imageUrl = imageUrl.replace(/[?&]w=\d+/g, '').replace(/[?&]h=\d+/g, '');
-                                    imageUrl = imageUrl.replace(/[?&]format=\w+/g, '');
                                     
                                     images.push(imageUrl);
                                 }
@@ -1056,6 +1082,88 @@ class XiaohongshuScraper {
     }
 
     /**
+     * 优化图片URL以去除水印
+     * @private
+     * @param {string} originalUrl - 原始图片URL
+     * @returns {string} 优化后的图片URL
+     */
+    optimizeImageUrlForWatermarkRemoval(originalUrl) {
+        try {
+            let optimizedUrl = originalUrl;
+            
+            // 方法1: 替换缩略图参数为原图
+            if (optimizedUrl.includes('thumbnail') || optimizedUrl.includes('thumb')) {
+                optimizedUrl = optimizedUrl.replace(/thumbnail|thumb/g, 'original');
+            }
+            
+            // 方法2: 移除所有尺寸限制参数
+            optimizedUrl = optimizedUrl.replace(/[?&]w=\d+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]h=\d+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]width=\d+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]height=\d+/g, '');
+            
+            // 方法3: 移除格式和质量参数
+            optimizedUrl = optimizedUrl.replace(/[?&]format=\w+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]quality=\d+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]q=\d+/g, '');
+            
+            // 方法4: 移除水印相关参数
+            optimizedUrl = optimizedUrl.replace(/[?&]watermark=\w+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]wm=\w+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]mark=\w+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]logo=\w+/g, '');
+            
+            // 方法5: 移除压缩和处理参数
+            optimizedUrl = optimizedUrl.replace(/[?&]compress=\w+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]resize=\w+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]crop=\w+/g, '');
+            
+            // 方法6: 尝试获取基础URL（移除所有查询参数）
+            if (optimizedUrl.includes('?')) {
+                const baseUrl = optimizedUrl.split('?')[0];
+                // 如果基础URL看起来是原始图片，使用它
+                if (baseUrl.includes('.jpg') || baseUrl.includes('.png') || baseUrl.includes('.jpeg') || baseUrl.includes('.webp')) {
+                    optimizedUrl = baseUrl;
+                }
+            }
+            
+            // 方法7: 尝试不同的图片服务端点
+            if (optimizedUrl.includes('sns-img')) {
+                // 小红书图片服务，尝试获取原图
+                optimizedUrl = optimizedUrl.replace(/sns-img-[^/]+/, 'sns-img-original');
+            }
+            
+            // 方法8: 移除时间戳和随机参数
+            optimizedUrl = optimizedUrl.replace(/[?&]t=\d+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]timestamp=\d+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]v=\d+/g, '');
+            optimizedUrl = optimizedUrl.replace(/[?&]version=\d+/g, '');
+            
+            // 清理多余的&符号
+            optimizedUrl = optimizedUrl.replace(/[?&]+/g, (match, offset) => {
+                return offset === 0 ? '?' : '&';
+            });
+            
+            // 如果URL以&结尾，移除它
+            if (optimizedUrl.endsWith('&')) {
+                optimizedUrl = optimizedUrl.slice(0, -1);
+            }
+            
+            // 如果URL以?结尾，移除它
+            if (optimizedUrl.endsWith('?')) {
+                optimizedUrl = optimizedUrl.slice(0, -1);
+            }
+            
+            console.log(`🔄 图片URL优化: ${originalUrl} -> ${optimizedUrl}`);
+            return optimizedUrl;
+            
+        } catch (error) {
+            console.error('❌ 优化图片URL时出错:', error.message);
+            return originalUrl;
+        }
+    }
+
+    /**
      * 滚动页面加载更多内容
      * @private
      */
@@ -1113,6 +1221,16 @@ class XiaohongshuScraper {
                 // 保存图片
                 await fs.writeFile(filePath, buffer);
                 
+                // 如果启用了图片处理，尝试去除水印
+                if (this.config.enableImageProcessing) {
+                    try {
+                        await this.processImageForWatermarkRemoval(filePath);
+                        console.log(`🔄 图片已处理水印: ${fileName}`);
+                    } catch (error) {
+                        console.log(`⚠️ 图片水印处理失败: ${fileName} - ${error.message}`);
+                    }
+                }
+                
                 console.log(`✅ 图片已保存: ${fileName}`);
                 downloadedCount++;
                 
@@ -1149,6 +1267,52 @@ class XiaohongshuScraper {
             return `image_${index.toString().padStart(3, '0')}${extension}`;
         } catch (error) {
             return `image_${index.toString().padStart(3, '0')}.jpg`;
+        }
+    }
+
+    /**
+     * 处理图片以去除水印
+     * @private
+     * @param {string} imagePath - 图片文件路径
+     */
+    async processImageForWatermarkRemoval(imagePath) {
+        try {
+            console.log(`🔄 开始处理图片水印: ${imagePath}`);
+            
+            // 读取图片信息
+            const imageInfo = await sharp(imagePath).metadata();
+            console.log(`📊 图片信息: ${imageInfo.width}x${imageInfo.height}, 格式: ${imageInfo.format}`);
+            
+            // 创建最终处理后的图片路径（只保存这一个版本）
+            const processedPath = imagePath.replace(/\.(jpg|jpeg|png|webp)$/i, '_processed.$1');
+            
+            // 方法1: 尝试裁剪右下角区域（小红书水印通常在右下角）
+            const cropWidth = Math.floor(imageInfo.width * 0.15); // 裁剪右下角15%宽度
+            const cropHeight = Math.floor(imageInfo.height * 0.1); // 裁剪右下角10%高度
+            
+            await sharp(imagePath)
+                .extract({
+                    left: 0,
+                    top: 0,
+                    width: imageInfo.width - cropWidth,
+                    height: imageInfo.height - cropHeight
+                })
+                .jpeg({ quality: 95 })
+                .toFile(processedPath);
+            
+            console.log(`✂️ 已裁剪右下角区域: ${processedPath}`);
+            
+            // 删除原始图片，只保留处理后的版本
+            await fs.remove(imagePath);
+            console.log(`🗑️ 已删除原始图片: ${imagePath}`);
+            
+            // 将处理后的图片重命名为最终文件名
+            await fs.move(processedPath, imagePath);
+            console.log(`✅ 已保存最终处理版本: ${imagePath}`);
+            
+        } catch (error) {
+            console.error(`❌ 图片水印处理失败: ${error.message}`);
+            throw error;
         }
     }
 

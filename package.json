@@ -7,6 +7,7 @@
     "start": "node example.js",
     "start:login": "node example-with-login.js",
     "test": "node test.js",
+    "test:watermark": "node test-watermark-removal.js",
     "dev": "node --inspect example.js",
     "dev:login": "node --inspect example-with-login.js"
   },
@@ -21,9 +22,10 @@
   "author": "AI Assistant",
   "license": "MIT",
   "dependencies": {
-    "playwright": "^1.40.0",
     "fs-extra": "^11.1.1",
     "path": "^0.12.7",
+    "playwright": "^1.40.0",
+    "sharp": "^0.33.5",
     "url": "^0.11.3"
   },
   "devDependencies": {

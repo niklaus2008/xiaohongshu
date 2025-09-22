@@ -1,0 +1,44 @@
+# 依赖文件
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+.specstory/*
+
+downloads/*
+test-downloads/*
+
+cursorindexingignore/*
+
+
+# 下载的图片
+downloads/
+test-downloads/
+
+# 配置文件（包含敏感信息）
+config.json
+
+# 日志文件
+*.log
+
+# 临时文件
+.tmp/
+temp/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 环境变量文件
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
