@@ -1,0 +1,1192 @@
+/**
+ * 小红书餐馆图片下载工具
+ * 基于Playwright实现自动化搜索和图片下载功能
+ * 
+ * @author AI Assistant
+ * @version 1.0.0
+ */
+
+const { chromium } = require('playwright');
+const fs = require('fs-extra');
+const path = require('path');
+const { URL } = require('url');
+
+/**
+ * 小红书餐馆图片下载器类
+ */
+class XiaohongshuScraper {
+    /**
+     * 构造函数
+     * @param {Object} options - 配置选项
+     * @param {string} options.downloadPath - 图片下载保存路径
+     * @param {number} options.maxImages - 最大下载图片数量
+     * @param {boolean} options.headless - 是否无头模式运行
+     * @param {number} options.delay - 请求间隔时间（毫秒）
+     * @param {number} options.timeout - 页面加载超时时间
+     * @param {string} options.userAgent - 浏览器User-Agent
+     */
+    constructor(options = {}) {
+        this.config = {
+            downloadPath: options.downloadPath || './downloads',
+            maxImages: options.maxImages || 20,
+            headless: options.headless !== undefined ? options.headless : false,
+            delay: options.delay || 1000,
+            timeout: options.timeout || 30000,
+            userAgent: options.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        };
+        
+        // 登录配置
+        this.loginConfig = options.login || null;
+        
+        this.browser = null;
+        this.page = null;
+        this.downloadedCount = 0;
+        this.errors = [];
+        
+        // 确保下载目录存在
+        this.ensureDownloadDir();
+    }
+
+    /**
+     * 确保下载目录存在
+     * @private
+     */
+    async ensureDownloadDir() {
+        try {
+            await fs.ensureDir(this.config.downloadPath);
+            console.log(`✅ 下载目录已准备: ${this.config.downloadPath}`);
+        } catch (error) {
+            console.error('❌ 创建下载目录失败:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * 初始化浏览器
+     * @private
+     */
+    async initBrowser() {
+        try {
+            console.log('🚀 正在启动浏览器...');
+            this.browser = await chromium.launch({
+                headless: this.config.headless,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--disable-gpu'
+                ]
+            });
+
+            // 创建浏览器上下文并设置User-Agent
+            const context = await this.browser.newContext({
+                userAgent: this.config.userAgent,
+                viewport: { width: 1920, height: 1080 }
+            });
+
+            this.page = await context.newPage();
+            
+            // 设置超时时间
+            this.page.setDefaultTimeout(this.config.timeout);
+            
+            console.log('✅ 浏览器初始化完成');
+        } catch (error) {
+            console.error('❌ 浏览器初始化失败:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * 搜索餐馆并下载图片
+     * @param {string} restaurantName - 餐馆名称
+     * @param {string} location - 地点信息
+     * @returns {Promise<Object>} 下载结果
+     */
+    async searchAndDownload(restaurantName, location) {
+        try {
+            console.log(`🔍 开始搜索餐馆: ${restaurantName} (${location})`);
+            
+            // 初始化浏览器
+            if (!this.browser) {
+                await this.initBrowser();
+            }
+
+            // 构建搜索关键词
+            const searchKeyword = `${restaurantName} ${location}`;
+            console.log(`📝 搜索关键词: ${searchKeyword}`);
+
+            // 检查是否需要登录
+            if (await this.checkLoginRequired()) {
+                console.log('⚠️ 检测到需要登录');
+                
+                // 尝试自动登录
+                if (this.loginConfig && this.loginConfig.autoLogin) {
+                    const loginSuccess = await this.autoLogin();
+                    if (!loginSuccess) {
+                        console.log('⚠️ 自动登录失败，请手动登录后继续...');
+                        await this.waitForLogin();
+                    }
+                } else {
+                    console.log('⚠️ 未启用自动登录，请手动登录后继续...');
+                    await this.waitForLogin();
+                }
+            }
+
+            // 登录完成后，执行搜索操作
+            console.log('🔍 登录完成，开始搜索操作...');
+            await this.performSearch(searchKeyword);
+
+            // 获取图片链接
+            const imageUrls = await this.extractImageUrls();
+            console.log(`📸 找到 ${imageUrls.length} 张图片`);
+
+            // 下载图片
+            const downloadResults = await this.downloadImages(imageUrls, restaurantName, location);
+            
+            return {
+                success: true,
+                restaurantName,
+                location,
+                totalFound: imageUrls.length,
+                downloadedCount: downloadResults.downloadedCount,
+                failedCount: downloadResults.failedCount,
+                errors: this.errors
+            };
+
+        } catch (error) {
+            console.error('❌ 搜索和下载过程中发生错误:', error.message);
+            this.errors.push({
+                type: 'search_error',
+                message: error.message,
+                timestamp: new Date().toISOString()
+            });
+            
+            return {
+                success: false,
+                restaurantName,
+                location,
+                error: error.message,
+                errors: this.errors
+            };
+        }
+    }
+
+    /**
+     * 检查是否需要登录
+     * @private
+     * @returns {Promise<boolean>}
+     */
+    async checkLoginRequired() {
+        try {
+            // 检查是否存在登录相关的元素
+            const loginElements = await this.page.$$('text=登录');
+            const loginRequired = loginElements.length > 0;
+            
+            if (loginRequired) {
+                console.log('🔐 检测到需要登录');
+            }
+            
+            return loginRequired;
+        } catch (error) {
+            console.log('⚠️ 检查登录状态时出错:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * 智能登录小红书（Cookie优先策略）
+     * @private
+     */
+    async autoLogin() {
+        try {
+            if (!this.loginConfig || !this.loginConfig.autoLogin) {
+                console.log('⚠️ 未启用自动登录，跳过');
+                return false;
+            }
+
+            // 第一步：优先尝试使用已保存的Cookie
+            if (this.loginConfig.saveCookies && await this.loadCookies()) {
+                console.log('🍪 尝试使用已保存的Cookie登录...');
+                const isLoggedIn = await this.checkLoginStatus();
+                if (isLoggedIn) {
+                    console.log('✅ 使用Cookie登录成功，无需重新登录！');
+                    return true;
+                } else {
+                    console.log('⚠️ Cookie已失效，需要重新登录');
+                }
+            }
+
+            // 第二步：Cookie失效或不存在时，进行重新登录
+            console.log('🔐 Cookie失效，开始重新登录...');
+            
+            // 根据登录方式选择不同的登录流程
+            const loginMethod = this.loginConfig.method || 'manual';
+            
+            let loginSuccess = false;
+            switch (loginMethod) {
+                case 'phone':
+                    loginSuccess = await this.phoneLogin();
+                    break;
+                case 'qr':
+                    loginSuccess = await this.qrCodeLogin();
+                    break;
+                case 'manual':
+                    loginSuccess = await this.manualLogin();
+                    break;
+                default:
+                    console.log('⚠️ 未知的登录方式，使用手动登录');
+                    loginSuccess = await this.manualLogin();
+            }
+            
+            // 第三步：登录成功后保存Cookie，实现一次登录长期使用
+            if (loginSuccess && this.loginConfig.saveCookies) {
+                await this.saveCookies();
+                console.log('💾 登录状态已保存，下次运行将自动使用Cookie登录');
+            }
+            
+            return loginSuccess;
+            
+        } catch (error) {
+            console.error('❌ 自动登录过程中发生错误:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * 手机号验证码登录
+     * @private
+     */
+    async phoneLogin() {
+        try {
+            if (!this.loginConfig.phone) {
+                console.log('❌ 未配置手机号');
+                return false;
+            }
+
+            console.log('📱 使用手机号验证码登录...');
+            
+            // 访问登录页面
+            await this.page.goto('https://www.xiaohongshu.com/explore', { 
+                waitUntil: 'domcontentloaded',
+                timeout: 60000
+            });
+            await this.page.waitForTimeout(3000);
+            
+            // 查找并点击登录按钮
+            try {
+                const loginButton = await this.page.waitForSelector('text=登录', { timeout: 5000 });
+                await loginButton.click();
+                console.log('✅ 点击登录按钮');
+            } catch (error) {
+                console.log('⚠️ 未找到登录按钮，可能已经登录');
+                return await this.checkLoginStatus();
+            }
+            
+            await this.page.waitForTimeout(2000);
+            
+            // 查找手机号输入框
+            try {
+                const phoneInput = await this.page.waitForSelector('input[placeholder*="手机号"], input[type="tel"], input[placeholder*="请输入手机号"]', { timeout: 5000 });
+                await phoneInput.fill(this.loginConfig.phone);
+                console.log('✅ 输入手机号');
+            } catch (error) {
+                console.log('❌ 未找到手机号输入框:', error.message);
+                return false;
+            }
+            
+            // 查找并点击获取验证码按钮
+            try {
+                const codeButton = await this.page.waitForSelector('button:has-text("获取验证码"), button:has-text("发送验证码")', { timeout: 5000 });
+                await codeButton.click();
+                console.log('✅ 点击获取验证码按钮');
+            } catch (error) {
+                console.log('❌ 未找到获取验证码按钮:', error.message);
+                return false;
+            }
+            
+            // 等待用户输入验证码
+            console.log('📲 请查看手机短信，输入验证码后按回车继续...');
+            await new Promise(resolve => {
+                process.stdin.once('data', () => {
+                    resolve();
+                });
+            });
+            
+            // 查找验证码输入框并等待用户输入
+            try {
+                const codeInput = await this.page.waitForSelector('input[placeholder*="验证码"], input[placeholder*="请输入验证码"]', { timeout: 5000 });
+                console.log('💡 请在浏览器中输入验证码，然后按回车继续...');
+                await new Promise(resolve => {
+                    process.stdin.once('data', () => {
+                        resolve();
+                    });
+                });
+            } catch (error) {
+                console.log('❌ 未找到验证码输入框:', error.message);
+                return false;
+            }
+            
+            // 等待登录完成
+            await this.page.waitForTimeout(3000);
+            
+            // 检查是否登录成功
+            const isLoggedIn = await this.checkLoginStatus();
+            if (isLoggedIn) {
+                console.log('✅ 手机号验证码登录成功');
+                // 保存Cookie
+                if (this.loginConfig.saveCookies) {
+                    await this.saveCookies();
+                }
+                return true;
+            } else {
+                console.log('❌ 手机号验证码登录失败');
+                return false;
+            }
+            
+        } catch (error) {
+            console.error('❌ 手机号登录过程中发生错误:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * 扫码登录
+     * @private
+     */
+    async qrCodeLogin() {
+        try {
+            console.log('📱 使用扫码登录...');
+            
+            // 访问登录页面，使用更宽松的加载策略
+            await this.page.goto('https://www.xiaohongshu.com/explore', { 
+                waitUntil: 'domcontentloaded',
+                timeout: 60000 // 增加到60秒超时
+            });
+            await this.page.waitForTimeout(3000);
+            
+            // 查找并点击登录按钮
+            try {
+                const loginButton = await this.page.waitForSelector('text=登录', { timeout: 5000 });
+                await loginButton.click();
+                console.log('✅ 点击登录按钮');
+            } catch (error) {
+                console.log('⚠️ 未找到登录按钮，可能已经登录');
+                return await this.checkLoginStatus();
+            }
+            
+            await this.page.waitForTimeout(3000);
+            
+            // 检查是否已经显示二维码（小红书默认显示扫码登录）
+            console.log('🔍 检查登录界面...');
+            
+            // 等待二维码出现
+            try {
+                await this.page.waitForSelector('img[alt*="二维码"], .qr-code, canvas', { timeout: 10000 });
+                console.log('✅ 二维码已显示');
+            } catch (error) {
+                console.log('⚠️ 未找到二维码，可能页面结构有变化');
+            }
+            
+            console.log('📱 请使用小红书APP或微信扫描页面上的二维码完成登录...');
+            console.log('⏳ 正在等待扫码完成，请稍候...');
+            
+            // 自动检测扫码完成，而不是等待用户按任意键
+            const loginSuccess = await this.waitForQrCodeLogin();
+            
+            if (loginSuccess) {
+                console.log('✅ 扫码登录成功！');
+                // 保存Cookie
+                if (this.loginConfig.saveCookies) {
+                    await this.saveCookies();
+                }
+                return true;
+            } else {
+                console.log('❌ 扫码登录失败或超时');
+                return false;
+            }
+            
+        } catch (error) {
+            console.error('❌ 扫码登录过程中发生错误:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * 等待二维码扫码登录完成
+     * @private
+     * @returns {Promise<boolean>}
+     */
+    async waitForQrCodeLogin() {
+        try {
+            const maxWaitTime = 300000; // 最大等待5分钟
+            const checkInterval = 2000; // 每2秒检查一次
+            let elapsedTime = 0;
+            
+            console.log('📱 请使用小红书APP或微信扫描页面上的二维码完成登录...');
+            console.log('⏳ 正在等待扫码完成，请稍候...');
+            
+            while (elapsedTime < maxWaitTime) {
+                // 检查是否登录成功
+                const isLoggedIn = await this.checkLoginStatus();
+                if (isLoggedIn) {
+                    console.log('🎉 检测到登录成功！');
+                    return true;
+                }
+                
+                // 检查页面是否跳转或关闭了登录弹窗
+                const currentUrl = this.page.url();
+                if (!currentUrl.includes('login') && !currentUrl.includes('signin')) {
+                    // 页面已跳转，可能登录成功
+                    console.log('🔄 检测到页面跳转，重新检查登录状态...');
+                    const isLoggedInAfterRedirect = await this.checkLoginStatus();
+                    if (isLoggedInAfterRedirect) {
+                        console.log('🎉 页面跳转后检测到登录成功！');
+                        return true;
+                    }
+                }
+                
+                // 等待一段时间后再次检查
+                await this.page.waitForTimeout(checkInterval);
+                elapsedTime += checkInterval;
+                
+                // 显示等待进度
+                if (elapsedTime % 10000 === 0) {
+                    console.log(`⏳ 已等待 ${elapsedTime / 1000} 秒，请继续扫码...`);
+                }
+                
+                // 每30秒提醒一次
+                if (elapsedTime % 30000 === 0 && elapsedTime > 0) {
+                    console.log('💡 提示：如果二维码已过期，请刷新页面重新获取二维码');
+                }
+            }
+            
+            console.log('⏰ 等待扫码超时（5分钟）');
+            return false;
+            
+        } catch (error) {
+            console.error('❌ 等待扫码登录时发生错误:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * 手动登录
+     * @private
+     */
+    async manualLogin() {
+        try {
+            console.log('👤 使用手动登录...');
+            
+            // 访问登录页面
+            await this.page.goto('https://www.xiaohongshu.com/explore', { 
+                waitUntil: 'domcontentloaded',
+                timeout: 60000
+            });
+            await this.page.waitForTimeout(3000);
+            
+            console.log('💡 请在浏览器中手动完成登录，登录完成后按回车继续...');
+            
+            // 等待用户手动登录
+            await new Promise(resolve => {
+                process.stdin.once('data', () => {
+                    resolve();
+                });
+            });
+            
+            // 检查是否登录成功
+            const isLoggedIn = await this.checkLoginStatus();
+            if (isLoggedIn) {
+                console.log('✅ 手动登录成功');
+                // 保存Cookie
+                if (this.loginConfig.saveCookies) {
+                    await this.saveCookies();
+                }
+                return true;
+            } else {
+                console.log('❌ 手动登录失败');
+                return false;
+            }
+            
+        } catch (error) {
+            console.error('❌ 手动登录过程中发生错误:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * 保存Cookie
+     * @private
+     */
+    async saveCookies() {
+        try {
+            if (!this.loginConfig.cookieFile) {
+                return;
+            }
+            
+            const cookies = await this.page.context().cookies();
+            await fs.writeJson(this.loginConfig.cookieFile, cookies, { spaces: 2 });
+            console.log('🍪 Cookie已保存到:', this.loginConfig.cookieFile);
+        } catch (error) {
+            console.error('❌ 保存Cookie失败:', error.message);
+        }
+    }
+
+    /**
+     * 加载Cookie
+     * @private
+     */
+    async loadCookies() {
+        try {
+            if (!this.loginConfig.cookieFile) {
+                console.log('⚠️ 未配置Cookie文件路径');
+                return false;
+            }
+            
+            if (!await fs.pathExists(this.loginConfig.cookieFile)) {
+                console.log('⚠️ Cookie文件不存在，需要首次登录');
+                return false;
+            }
+            
+            const cookies = await fs.readJson(this.loginConfig.cookieFile);
+            
+            // 检查Cookie是否为空或无效
+            if (!cookies || cookies.length === 0) {
+                console.log('⚠️ Cookie文件为空，需要重新登录');
+                return false;
+            }
+            
+            // 检查Cookie是否过期（简单检查）
+            const now = Date.now();
+            const validCookies = cookies.filter(cookie => {
+                if (cookie.expires && cookie.expires < now / 1000) {
+                    return false; // Cookie已过期
+                }
+                return true;
+            });
+            
+            if (validCookies.length === 0) {
+                console.log('⚠️ 所有Cookie已过期，需要重新登录');
+                return false;
+            }
+            
+            await this.page.context().addCookies(validCookies);
+            console.log(`🍪 已加载 ${validCookies.length} 个有效Cookie`);
+            return true;
+            
+        } catch (error) {
+            console.error('❌ 加载Cookie失败:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * 执行搜索操作
+     * @private
+     * @param {string} keyword - 搜索关键词
+     */
+    async performSearch(keyword) {
+        try {
+            console.log('🔍 开始搜索操作...');
+            
+            // 查找搜索栏
+            const searchSelectors = [
+                'input[placeholder*="搜索"]',
+                'input[placeholder*="小红书"]',
+                '.search-input input',
+                '[data-testid*="search"] input',
+                'input[type="search"]'
+            ];
+            
+            let searchInput = null;
+            for (const selector of searchSelectors) {
+                try {
+                    searchInput = await this.page.waitForSelector(selector, { timeout: 3000 });
+                    if (searchInput) {
+                        console.log(`✅ 找到搜索栏: ${selector}`);
+                        break;
+                    }
+                } catch (error) {
+                    continue;
+                }
+            }
+            
+            if (!searchInput) {
+                console.log('❌ 未找到搜索栏，尝试直接访问搜索页面');
+                const searchUrl = `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(keyword)}&type=51`;
+                await this.page.goto(searchUrl, { 
+                    waitUntil: 'domcontentloaded',
+                    timeout: 60000
+                });
+                await this.page.waitForTimeout(3000);
+                return;
+            }
+            
+            // 清空搜索栏并输入关键词
+            await searchInput.click();
+            await searchInput.fill('');
+            await searchInput.fill(keyword);
+            console.log(`✅ 已输入搜索关键词: ${keyword}`);
+            
+            // 按回车键或点击搜索按钮
+            try {
+                await searchInput.press('Enter');
+                console.log('✅ 按回车键搜索');
+            } catch (error) {
+                // 如果按回车失败，尝试点击搜索按钮
+                try {
+                    const searchButton = await this.page.waitForSelector('button[type="submit"], .search-btn, [data-testid*="search"] button', { timeout: 3000 });
+                    await searchButton.click();
+                    console.log('✅ 点击搜索按钮');
+                } catch (error2) {
+                    console.log('⚠️ 未找到搜索按钮，使用回车键');
+                    await searchInput.press('Enter');
+                }
+            }
+            
+            // 等待搜索结果加载
+            console.log('⏳ 等待搜索结果加载...');
+            await this.page.waitForTimeout(5000);
+            
+            // 等待页面稳定
+            try {
+                await this.page.waitForLoadState('domcontentloaded', { timeout: 30000 });
+            } catch (error) {
+                console.log('⚠️ 页面加载超时，继续执行...');
+            }
+            
+            // 点击"图文"标签
+            await this.clickImageTab();
+            
+        } catch (error) {
+            console.error('❌ 搜索操作失败:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * 点击"图文"标签
+     * @private
+     */
+    async clickImageTab() {
+        try {
+            console.log('📸 尝试点击"图文"标签...');
+            
+            // 查找"图文"标签
+            const imageTabSelectors = [
+                'text=图文',
+                '[data-testid*="image"]',
+                '.tab:has-text("图文")',
+                'button:has-text("图文")',
+                'div:has-text("图文")'
+            ];
+            
+            let imageTab = null;
+            for (const selector of imageTabSelectors) {
+                try {
+                    imageTab = await this.page.waitForSelector(selector, { timeout: 3000 });
+                    if (imageTab) {
+                        console.log(`✅ 找到图文标签: ${selector}`);
+                        break;
+                    }
+                } catch (error) {
+                    continue;
+                }
+            }
+            
+            if (imageTab) {
+                await imageTab.click();
+                console.log('✅ 已点击"图文"标签');
+                await this.page.waitForTimeout(3000);
+            } else {
+                console.log('⚠️ 未找到"图文"标签，继续使用当前页面');
+            }
+            
+        } catch (error) {
+            console.error('❌ 点击图文标签失败:', error.message);
+        }
+    }
+
+    /**
+     * 检查登录状态
+     * @private
+     * @returns {Promise<boolean>}
+     */
+    async checkLoginStatus() {
+        try {
+            console.log('🔍 检查登录状态...');
+            
+            // 简化的登录状态检测
+            const loginInfo = await this.page.evaluate(() => {
+                const info = {
+                    currentUrl: window.location.href,
+                    pageTitle: document.title,
+                    hasUserElements: false,
+                    hasLoginElements: false,
+                    bodyText: document.body ? document.body.innerText : ''
+                };
+                
+                // 检查用户相关元素
+                const userSelectors = [
+                    '.avatar', '.user-avatar', '.profile-avatar',
+                    '.user-name', '.username', '.profile-name',
+                    '.user-info', '.header-user', '.profile-menu',
+                    '[data-testid*="avatar"]', '[data-testid*="user"]',
+                    '[data-testid*="profile"]'
+                ];
+                
+                for (const selector of userSelectors) {
+                    if (document.querySelector(selector)) {
+                        info.hasUserElements = true;
+                        break;
+                    }
+                }
+                
+                // 检查登录相关元素
+                const loginSelectors = [
+                    '.login-btn', '.login-button', '.signin-btn',
+                    '[data-testid*="login"]', '[data-testid*="signin"]'
+                ];
+                
+                for (const selector of loginSelectors) {
+                    if (document.querySelector(selector)) {
+                        info.hasLoginElements = true;
+                        break;
+                    }
+                }
+                
+                // 检查页面文本中是否包含登录相关内容
+                if (info.bodyText.includes('登录') || info.bodyText.includes('扫码登录')) {
+                    info.hasLoginElements = true;
+                }
+                
+                return info;
+            });
+            
+            console.log('📊 登录状态检测结果:', {
+                url: loginInfo.currentUrl,
+                hasUserElements: loginInfo.hasUserElements,
+                hasLoginElements: loginInfo.hasLoginElements
+            });
+            
+            // 判断是否已登录
+            const isLoggedIn = loginInfo.hasUserElements && !loginInfo.hasLoginElements;
+            
+            console.log(`✅ 登录状态: ${isLoggedIn ? '已登录' : '未登录'}`);
+            
+            return isLoggedIn;
+            
+        } catch (error) {
+            console.error('❌ 检查登录状态时出错:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * 等待用户登录
+     * @private
+     */
+    async waitForLogin() {
+        console.log('⏳ 等待用户登录...');
+        console.log('💡 请在浏览器中完成登录，登录完成后按任意键继续...');
+        
+        // 等待用户手动登录
+        await new Promise(resolve => {
+            process.stdin.once('data', () => {
+                resolve();
+            });
+        });
+        
+        console.log('✅ 登录完成，继续执行...');
+    }
+
+    /**
+     * 提取图片URL（按点赞数排序选择内容）
+     * @private
+     * @returns {Promise<Array>} 图片URL数组
+     */
+    async extractImageUrls() {
+        try {
+            console.log('🔍 正在提取图片链接...');
+            
+            // 等待内容加载
+            await this.page.waitForTimeout(5000);
+            
+            // 获取当前页面信息
+            const pageInfo = await this.page.evaluate(() => {
+                return {
+                    url: window.location.href,
+                    title: document.title,
+                    bodyText: document.body ? document.body.innerText.substring(0, 500) : '',
+                    imgCount: document.querySelectorAll('img').length,
+                    divCount: document.querySelectorAll('div').length
+                };
+            });
+
+            console.log('📄 当前页面信息:', pageInfo);
+            
+            // 滚动页面加载更多内容
+            await this.scrollToLoadMore();
+            
+            // 提取内容卡片和图片信息
+            const contentData = await this.page.evaluate(() => {
+                const contents = [];
+                
+                // 查找内容卡片 - 使用更广泛的选择器
+                const cardSelectors = [
+                    '.note-item',
+                    '.feed-item', 
+                    '.content-item',
+                    '.note-card',
+                    '.search-item',
+                    '.result-item',
+                    '[data-testid*="note"]',
+                    '[data-testid*="feed"]',
+                    '[data-testid*="content"]',
+                    '.note',
+                    '.feed',
+                    '.item',
+                    'article',
+                    '.card'
+                ];
+                
+                let cards = [];
+                for (const selector of cardSelectors) {
+                    cards = document.querySelectorAll(selector);
+                    if (cards.length > 0) {
+                        console.log(`找到 ${cards.length} 个内容卡片: ${selector}`);
+                        break;
+                    }
+                }
+                
+                // 如果没有找到特定的卡片，尝试查找包含图片的容器
+                if (cards.length === 0) {
+                    console.log('未找到特定卡片，尝试查找包含图片的容器...');
+                    const imgContainers = document.querySelectorAll('img');
+                    const containerMap = new Map();
+                    
+                    imgContainers.forEach(img => {
+                        if (img.src && img.src.includes('http')) {
+                            // 找到图片的父容器
+                            let container = img.closest('div, article, section, li');
+                            if (container) {
+                                const containerId = container.outerHTML.substring(0, 100);
+                                if (!containerMap.has(containerId)) {
+                                    containerMap.set(containerId, {
+                                        container: container,
+                                        images: []
+                                    });
+                                }
+                                containerMap.get(containerId).images.push(img);
+                            }
+                        }
+                    });
+                    
+                    cards = Array.from(containerMap.values()).map(item => item.container);
+                    console.log(`通过图片容器找到 ${cards.length} 个卡片`);
+                }
+
+                // 如果还是没有找到，尝试查找所有包含图片的div
+                if (cards.length === 0) {
+                    console.log('尝试查找所有包含图片的div...');
+                    const allDivs = document.querySelectorAll('div');
+                    cards = Array.from(allDivs).filter(div => {
+                        const imgs = div.querySelectorAll('img');
+                        return imgs.length > 0 && imgs.length < 10; // 避免选择包含太多图片的容器
+                    });
+                    console.log(`找到 ${cards.length} 个包含图片的div`);
+                }
+                
+                cards.forEach((card, index) => {
+                    try {
+                        // 提取点赞数
+                        let likeCount = 0;
+                        const likeSelectors = [
+                            '.like-count',
+                            '.heart-count',
+                            '[data-testid*="like"]',
+                            '.interaction-count',
+                            'span:contains("赞")',
+                            'span:contains("❤")'
+                        ];
+                        
+                        for (const selector of likeSelectors) {
+                            const likeElement = card.querySelector(selector);
+                            if (likeElement) {
+                                const likeText = likeElement.textContent || likeElement.innerText;
+                                const match = likeText.match(/(\d+)/);
+                                if (match) {
+                                    likeCount = parseInt(match[1]);
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // 提取图片
+                        const images = [];
+                        const imgElements = card.querySelectorAll('img');
+                        
+                        imgElements.forEach(img => {
+                            if (img.src && img.src.includes('http')) {
+                                const width = img.naturalWidth || img.width || 0;
+                                const height = img.naturalHeight || img.height || 0;
+                                
+                                // 更严格的过滤条件，排除头像和系统图片
+                                const isLargeEnough = width > 200 && height > 200; // 提高尺寸要求
+                                const isNotAvatar = !img.src.includes('avatar') && 
+                                                   !img.src.includes('icon') && 
+                                                   !img.src.includes('profile') &&
+                                                   !img.src.includes('head') &&
+                                                   !img.src.includes('user');
+                                const isNotSystem = !img.src.includes('logo') && 
+                                                   !img.src.includes('banner') && 
+                                                   !img.src.includes('button') &&
+                                                   !img.src.includes('nav') &&
+                                                   !img.src.includes('menu') &&
+                                                   !img.src.includes('header') &&
+                                                   !img.src.includes('footer');
+                                const isNotEmoji = !img.src.includes('emoji') && 
+                                                   !img.src.includes('smiley') &&
+                                                   !img.src.includes('sticker');
+                                const isNotAd = !img.src.includes('ad') && 
+                                               !img.src.includes('promo') &&
+                                               !img.src.includes('sponsor');
+                                
+                                // 检查图片是否在内容区域内（不是页面装饰元素）
+                                const isInContentArea = img.closest('.note-item, .feed-item, .content-item, .note-card, .search-item, .result-item, article, .card');
+                                
+                                if (isLargeEnough && isNotAvatar && isNotSystem && isNotEmoji && isNotAd && isInContentArea) {
+                                    let imageUrl = img.src;
+                                    
+                                    // 优化图片URL，获取更高质量的图片
+                                    if (imageUrl.includes('thumbnail') || imageUrl.includes('thumb')) {
+                                        imageUrl = imageUrl.replace(/thumbnail|thumb/g, 'original');
+                                    }
+                                    
+                                    // 移除尺寸限制参数，获取原图
+                                    imageUrl = imageUrl.replace(/[?&]w=\d+/g, '').replace(/[?&]h=\d+/g, '');
+                                    imageUrl = imageUrl.replace(/[?&]format=\w+/g, '');
+                                    
+                                    images.push(imageUrl);
+                                }
+                            }
+                        });
+                        
+                        if (images.length > 0) {
+                            contents.push({
+                                index: index,
+                                likeCount: likeCount,
+                                images: images,
+                                title: card.querySelector('h1, h2, h3, .title, .note-title')?.textContent || `内容 ${index + 1}`
+                            });
+                        }
+                        
+                    } catch (error) {
+                        console.log(`处理卡片 ${index} 时出错:`, error.message);
+                    }
+                });
+                
+                return contents;
+            });
+            
+            console.log(`📸 找到 ${contentData.length} 个内容卡片`);
+            
+            // 按点赞数排序，选择前2个最受欢迎的内容
+            contentData.sort((a, b) => b.likeCount - a.likeCount);
+            const topContents = contentData.slice(0, 2);
+            
+            console.log('🏆 点赞数最多的内容:');
+            topContents.forEach((content, index) => {
+                console.log(`  ${index + 1}. ${content.title} - ${content.likeCount} 赞 - ${content.images.length} 张图片`);
+            });
+            
+            // 提取所有图片
+            const allImages = [];
+            topContents.forEach(content => {
+                allImages.push(...content.images);
+            });
+            
+            // 去重
+            const uniqueImages = [...new Set(allImages)];
+            
+            console.log(`📸 总共提取到 ${uniqueImages.length} 张图片`);
+            
+            // 如果过滤后没有图片，尝试更宽松的过滤条件
+            if (uniqueImages.length === 0) {
+                console.log('⚠️ 过滤后没有图片，尝试更宽松的过滤条件...');
+                const allPageImages = await this.page.evaluate(() => {
+                    const images = [];
+                    const imgElements = document.querySelectorAll('img');
+                    
+                    imgElements.forEach(img => {
+                        if (img.src && img.src.includes('http')) {
+                            const width = img.naturalWidth || img.width || 0;
+                            const height = img.naturalHeight || img.height || 0;
+                            
+                            // 更宽松但仍然排除明显不是内容的图片
+                            const isLargeEnough = width > 150 && height > 150;
+                            const isNotAvatar = !img.src.includes('avatar') && 
+                                               !img.src.includes('icon') && 
+                                               !img.src.includes('profile');
+                            const isNotSystem = !img.src.includes('logo') && 
+                                               !img.src.includes('banner') && 
+                                               !img.src.includes('button');
+                            
+                            if (isLargeEnough && isNotAvatar && isNotSystem) {
+                                images.push(img.src);
+                            }
+                        }
+                    });
+                    
+                    return images;
+                });
+                
+                console.log(`📸 页面中找到 ${allPageImages.length} 张图片`);
+                return allPageImages.slice(0, this.config.maxImages);
+            }
+            
+            return uniqueImages.slice(0, this.config.maxImages);
+            
+        } catch (error) {
+            console.error('❌ 提取图片链接失败:', error.message);
+            return [];
+        }
+    }
+
+    /**
+     * 滚动页面加载更多内容
+     * @private
+     */
+    async scrollToLoadMore() {
+        try {
+            console.log('📜 滚动页面加载更多内容...');
+            
+            for (let i = 0; i < 3; i++) {
+                await this.page.evaluate(() => {
+                    window.scrollTo(0, document.body.scrollHeight);
+                });
+                await this.page.waitForTimeout(2000);
+            }
+            
+        } catch (error) {
+            console.log('⚠️ 滚动页面时出错:', error.message);
+        }
+    }
+
+    /**
+     * 下载图片
+     * @private
+     * @param {Array} imageUrls - 图片URL数组
+     * @param {string} restaurantName - 餐馆名称
+     * @param {string} location - 地点信息
+     * @returns {Promise<Object>} 下载结果
+     */
+    async downloadImages(imageUrls, restaurantName, location) {
+        let downloadedCount = 0;
+        let failedCount = 0;
+        
+        // 创建餐馆专用文件夹
+        const restaurantFolder = path.join(
+            this.config.downloadPath, 
+            this.sanitizeFileName(`${restaurantName}_${location}`)
+        );
+        await fs.ensureDir(restaurantFolder);
+        
+        console.log(`📁 图片将保存到: ${restaurantFolder}`);
+        
+        for (let i = 0; i < imageUrls.length; i++) {
+            const imageUrl = imageUrls[i];
+            
+            try {
+                console.log(`⬇️ 正在下载第 ${i + 1}/${imageUrls.length} 张图片...`);
+                
+                // 获取图片内容
+                const response = await this.page.goto(imageUrl);
+                const buffer = await response.body();
+                
+                // 生成文件名
+                const fileName = this.generateFileName(imageUrl, i + 1);
+                const filePath = path.join(restaurantFolder, fileName);
+                
+                // 保存图片
+                await fs.writeFile(filePath, buffer);
+                
+                console.log(`✅ 图片已保存: ${fileName}`);
+                downloadedCount++;
+                
+                // 添加延迟避免请求过快
+                await this.page.waitForTimeout(this.config.delay);
+                
+            } catch (error) {
+                console.error(`❌ 下载图片失败 (${imageUrl}):`, error.message);
+                failedCount++;
+                this.errors.push({
+                    type: 'download_error',
+                    url: imageUrl,
+                    message: error.message,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        }
+        
+        return { downloadedCount, failedCount };
+    }
+
+    /**
+     * 生成文件名
+     * @private
+     * @param {string} imageUrl - 图片URL
+     * @param {number} index - 图片索引
+     * @returns {string} 文件名
+     */
+    generateFileName(imageUrl, index) {
+        try {
+            const url = new URL(imageUrl);
+            const pathname = url.pathname;
+            const extension = path.extname(pathname) || '.jpg';
+            return `image_${index.toString().padStart(3, '0')}${extension}`;
+        } catch (error) {
+            return `image_${index.toString().padStart(3, '0')}.jpg`;
+        }
+    }
+
+    /**
+     * 清理文件名中的非法字符
+     * @private
+     * @param {string} fileName - 原始文件名
+     * @returns {string} 清理后的文件名
+     */
+    sanitizeFileName(fileName) {
+        return fileName.replace(/[<>:"/\\|?*]/g, '_').trim();
+    }
+
+    /**
+     * 关闭浏览器
+     */
+    async close() {
+        try {
+            if (this.browser) {
+                await this.browser.close();
+                console.log('🔒 浏览器已关闭');
+            }
+        } catch (error) {
+            console.error('❌ 关闭浏览器时出错:', error.message);
+        }
+    }
+
+    /**
+     * 获取下载统计信息
+     * @returns {Object} 统计信息
+     */
+    getStats() {
+        return {
+            downloadedCount: this.downloadedCount,
+            errors: this.errors,
+            config: this.config
+        };
+    }
+}
+
+module.exports = { XiaohongshuScraper };

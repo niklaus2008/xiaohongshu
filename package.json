@@ -1,0 +1,43 @@
+{
+  "name": "xiaohongshu-restaurant-scraper",
+  "version": "1.0.0",
+  "description": "基于Playwright的小红书餐馆图片下载工具",
+  "main": "src/xiaohongshu-scraper.js",
+  "scripts": {
+    "start": "node example.js",
+    "start:login": "node example-with-login.js",
+    "test": "node test.js",
+    "dev": "node --inspect example.js",
+    "dev:login": "node --inspect example-with-login.js"
+  },
+  "keywords": [
+    "xiaohongshu",
+    "scraper",
+    "playwright",
+    "restaurant",
+    "image-download",
+    "automation"
+  ],
+  "author": "AI Assistant",
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.40.0",
+    "fs-extra": "^11.1.1",
+    "path": "^0.12.7",
+    "url": "^0.11.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/xiaohongshu-restaurant-scraper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/xiaohongshu-restaurant-scraper/issues"
+  },
+  "homepage": "https://github.com/your-username/xiaohongshu-restaurant-scraper#readme"
+}

@@ -1,0 +1,16 @@
+{
+  "login": {
+    "method": "manual", 
+    "phone": "your_phone_number_here",
+    "autoLogin": true,
+    "saveCookies": true,
+    "cookieFile": "./cookies.json"
+  },
+  "scraper": {
+    "downloadPath": "./downloads",
+    "maxImages": 20,
+    "headless": false,
+    "delay": 2000,
+    "timeout": 30000
+  }
+}
