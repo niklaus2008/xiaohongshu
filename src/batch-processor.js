@@ -69,7 +69,15 @@ class BatchProcessor {
      */
     async start() {
         try {
-            this.log('开始批量下载任务', 'info');
+            this.log('🧹 已清空之前的未完成任务', 'info');
+            this.log('🚀 开始批量下载任务', 'info');
+            this.log(`📊 总餐馆数: ${this.restaurants.length}`, 'info');
+            this.log(`📁 输出目录: ${this.outputPath}`, 'info');
+            this.log(`🖼️ 每个餐馆最大图片数: ${this.options.maxImages}`, 'info');
+            this.log(`⏱️ 请求间隔: ${this.options.delay}ms`, 'info');
+            this.log(`🎯 去水印: ${this.options.tryRemoveWatermark ? '启用' : '禁用'}`, 'info');
+            this.log(`🖼️ 图片处理: ${this.options.enableImageProcessing ? '启用' : '禁用'}`, 'info');
+            this.log(`🔄 最大并发数: ${this.options.maxConcurrent}`, 'info');
             this._isRunning = true;
             this.isPaused = false;
             this.stats.startTime = new Date();
@@ -95,6 +103,7 @@ class BatchProcessor {
             this.emitStatus();
             
             // 开始处理任务
+            this.log(`🎯 开始处理任务队列...`, 'info');
             await this.processTasks();
             
         } catch (error) {
@@ -163,12 +172,14 @@ class BatchProcessor {
         while (this._isRunning && !this.isPaused && this.currentIndex < this.taskQueue.length) {
             // 检查并发限制
             if (this.activeTasks.size >= this.options.maxConcurrent) {
+                this.log(`⏳ 等待并发任务完成 (当前活跃任务: ${this.activeTasks.size}/${this.options.maxConcurrent})`, 'info');
                 await this.waitForTaskCompletion();
                 continue;
             }
             
             const task = this.taskQueue[this.currentIndex];
             if (task.status === 'pending') {
+                this.log(`🚀 启动任务: ${task.restaurant.name}`, 'info');
                 this.processTask(task);
             }
             
@@ -176,8 +187,11 @@ class BatchProcessor {
         }
         
         // 等待所有活跃任务完成
-        while (this.activeTasks.size > 0) {
-            await this.waitForTaskCompletion();
+        if (this.activeTasks.size > 0) {
+            this.log(`⏳ 等待所有活跃任务完成 (剩余: ${this.activeTasks.size})`, 'info');
+            while (this.activeTasks.size > 0) {
+                await this.waitForTaskCompletion();
+            }
         }
         
         // 所有任务完成
@@ -192,17 +206,32 @@ class BatchProcessor {
      * @private
      */
     async processTask(task) {
+        const startTime = Date.now();
+        const TASK_TIMEOUT = 300000; // 5分钟超时
+        let timeoutId = null;
+        
         try {
+            this.log(`🚀 开始处理任务: ${task.restaurant.name}`, 'info');
             task.status = 'processing';
             this.activeTasks.add(task);
+            
+            // 设置超时机制
+            timeoutId = setTimeout(() => {
+                this.log(`⏰ 任务超时: ${task.restaurant.name} (超过5分钟)`, 'error');
+                task.status = 'timeout';
+                task.error = '任务执行超时';
+            }, TASK_TIMEOUT);
             
             // 更新餐馆进度状态
             this.updateRestaurantProgress(task.index, 'processing', 0, 0, 0);
             
             const { restaurant } = task;
             this.log(`开始处理餐馆: ${restaurant.name} (${restaurant.location})`, 'info');
+            this.log(`📊 任务进度: ${this.currentIndex + 1}/${this.restaurants.length}`, 'info');
             
             // 创建爬虫实例，使用已保存的Cookie
+            this.log(`🔧 正在初始化爬虫实例...`, 'info');
+            const scraperStartTime = Date.now();
             const scraper = new XiaohongshuScraper({
                 downloadPath: this.outputPath,
                 maxImages: restaurant.maxImages || this.options.maxImages,
@@ -220,9 +249,20 @@ class BatchProcessor {
             });
             
             task.scraper = scraper;
+            const scraperInitTime = Date.now() - scraperStartTime;
+            this.log(`✅ 爬虫实例初始化完成 (耗时: ${scraperInitTime}ms)`, 'info');
             
             // 执行搜索和下载
+            this.log(`🔍 开始搜索和下载图片...`, 'info');
+            const searchStartTime = Date.now();
             const result = await scraper.searchAndDownload(restaurant.name, restaurant.location);
+            const searchTime = Date.now() - searchStartTime;
+            this.log(`⏱️ 搜索和下载完成 (耗时: ${searchTime}ms)`, 'info');
+            
+            // 清除超时
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
             
             // 更新统计信息
             this.stats.totalImages += result.totalFound || 0;
@@ -254,6 +294,7 @@ class BatchProcessor {
             task.error = error.message;
             this.stats.failedRestaurants++;
             this.log(`❌ 餐馆处理异常: ${task.restaurant.name} - ${error.message}`, 'error');
+            this.log(`📊 错误堆栈: ${error.stack}`, 'error');
             this.errors.push({
                 restaurant: task.restaurant.name,
                 error: error.message,
@@ -262,11 +303,24 @@ class BatchProcessor {
             // 更新餐馆进度为失败状态
             this.updateRestaurantProgress(task.index, 'failed', 0, 0, 0);
         } finally {
+            // 清除超时
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            
             // 清理资源
+            const totalTime = Date.now() - startTime;
+            this.log(`🧹 正在清理资源... (任务总耗时: ${totalTime}ms)`, 'info');
             if (task.scraper) {
-                await task.scraper.close();
+                try {
+                    await task.scraper.close();
+                    this.log(`✅ 爬虫实例已关闭`, 'info');
+                } catch (closeError) {
+                    this.log(`⚠️ 关闭爬虫实例时出错: ${closeError.message}`, 'warning');
+                }
             }
             this.activeTasks.delete(task);
+            this.log(`✅ 资源清理完成，活跃任务数: ${this.activeTasks.size}`, 'info');
             this.emitStatus();
         }
     }
@@ -295,9 +349,28 @@ class BatchProcessor {
      */
     async waitForTaskCompletion() {
         return new Promise((resolve) => {
+            let checkCount = 0;
             const checkInterval = setInterval(() => {
+                checkCount++;
+                
+                // 每5秒输出一次等待状态，包含更详细的信息
+                if (checkCount % 5 === 0) {
+                    const activeTaskDetails = Array.from(this.activeTasks).map(task => {
+                        return {
+                            restaurant: task.restaurant?.name || 'Unknown',
+                            status: task.status,
+                            hasScraper: !!task.scraper
+                        };
+                    });
+                    
+                    this.log(`⏳ 等待任务完成中... (活跃任务: ${this.activeTasks.size}/${this.options.maxConcurrent}, 已等待: ${checkCount}秒)`, 'info');
+                    this.log(`📊 活跃任务详情: ${JSON.stringify(activeTaskDetails)}`, 'info');
+                    this.log(`🔄 当前索引: ${this.currentIndex}/${this.taskQueue.length}`, 'info');
+                }
+                
                 if (this.activeTasks.size < this.options.maxConcurrent || !this._isRunning) {
                     clearInterval(checkInterval);
+                    this.log(`✅ 等待完成，活跃任务数: ${this.activeTasks.size}`, 'info');
                     resolve();
                 }
             }, 1000);

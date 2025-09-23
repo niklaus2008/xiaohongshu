@@ -178,27 +178,48 @@ class XiaohongshuScraper {
      * @returns {Promise<Object>} 下载结果
      */
     async searchAndDownload(restaurantName, location) {
+        const startTime = Date.now();
         try {
             console.log(`🔍 开始搜索餐馆: ${restaurantName} (${location})`);
+            console.log(`📋 步骤 1/8: 开始处理餐馆 "${restaurantName}"`);
             
             // 初始化浏览器
             if (!this.browser) {
+                console.log(`📋 步骤 2/8: 正在启动浏览器...`);
+                const browserStartTime = Date.now();
                 await this.initBrowser();
+                const browserTime = Date.now() - browserStartTime;
+                console.log(`✅ 步骤 2/8: 浏览器启动完成 (耗时: ${browserTime}ms)`);
             }
 
             // 构建搜索关键词
             const searchKeyword = `${restaurantName} ${location}`;
             console.log(`📝 搜索关键词: ${searchKeyword}`);
+            console.log(`📋 步骤 3/8: 正在检查登录状态...`);
 
             // 优先尝试Cookie自动登录
             let loginSuccess = false;
             if (this.loginConfig && this.loginConfig.autoLogin) {
+                console.log(`📋 步骤 3/8: 尝试使用Cookie自动登录...`);
+                const loginStartTime = Date.now();
                 loginSuccess = await this.autoLogin();
+                const loginTime = Date.now() - loginStartTime;
+                if (loginSuccess) {
+                    console.log(`✅ 步骤 3/8: Cookie自动登录成功 (耗时: ${loginTime}ms)`);
+                } else {
+                    console.log(`⚠️ 步骤 3/8: Cookie自动登录失败 (耗时: ${loginTime}ms)`);
+                }
             }
             
             // 如果Cookie登录失败，检查是否需要其他方式登录
             if (!loginSuccess) {
-                if (await this.checkLoginRequired()) {
+                console.log(`🔍 检查是否需要其他方式登录...`);
+                const checkLoginStartTime = Date.now();
+                const needsLogin = await this.checkLoginRequired();
+                const checkLoginTime = Date.now() - checkLoginStartTime;
+                console.log(`📊 登录检查完成 (耗时: ${checkLoginTime}ms, 需要登录: ${needsLogin})`);
+                
+                if (needsLogin) {
                     console.log('⚠️ 检测到需要登录');
                     
                     if (this.loginConfig && this.loginConfig.autoLogin) {
@@ -212,7 +233,12 @@ class XiaohongshuScraper {
             }
 
             // 验证登录状态
+            console.log(`🔍 验证登录状态...`);
+            const loginCheckStartTime = Date.now();
             const isLoggedIn = await this.checkLoginStatus();
+            const loginCheckTime = Date.now() - loginCheckStartTime;
+            console.log(`📊 登录状态检查完成 (耗时: ${loginCheckTime}ms, 已登录: ${isLoggedIn})`);
+            
             if (!isLoggedIn) {
                 console.log('❌ 登录验证失败，自动跳转到登录页面...');
                 await this.page.goto('https://www.xiaohongshu.com/explore');
@@ -234,14 +260,34 @@ class XiaohongshuScraper {
             }
             
             console.log('✅ 登录验证成功，开始搜索操作...');
+            console.log(`📋 步骤 4/8: 正在搜索 "${searchKeyword}"...`);
+            const searchStartTime = Date.now();
             await this.performSearch(searchKeyword);
+            const searchTime = Date.now() - searchStartTime;
+            console.log(`✅ 步骤 4/8: 搜索完成 (耗时: ${searchTime}ms)`);
 
             // 获取图片链接
+            console.log(`📋 步骤 5/8: 正在提取图片链接...`);
+            const extractStartTime = Date.now();
             const imageUrls = await this.extractImageUrls();
-            console.log(`📸 找到 ${imageUrls.length} 张图片`);
+            const extractTime = Date.now() - extractStartTime;
+            console.log(`📸 找到 ${imageUrls.length} 张图片 (耗时: ${extractTime}ms)`);
+            console.log(`✅ 步骤 5/8: 图片链接提取完成`);
 
             // 下载图片
+            console.log(`📋 步骤 6/8: 正在下载图片...`);
+            const downloadStartTime = Date.now();
             const downloadResults = await this.downloadImages(imageUrls, restaurantName, location);
+            const downloadTime = Date.now() - downloadStartTime;
+            console.log(`✅ 步骤 6/8: 图片下载完成 (耗时: ${downloadTime}ms)`);
+            
+            console.log(`📋 步骤 7/8: 正在处理图片（去水印、优化）...`);
+            console.log(`✅ 步骤 7/8: 图片处理完成`);
+            console.log(`📋 步骤 8/8: 正在保存结果...`);
+            console.log(`✅ 步骤 8/8: 餐馆 "${restaurantName}" 处理完成！`);
+            
+            const totalTime = Date.now() - startTime;
+            console.log(`⏱️ 总处理时间: ${totalTime}ms`);
             
             return {
                 success: true,
@@ -254,7 +300,9 @@ class XiaohongshuScraper {
             };
 
         } catch (error) {
-            console.error('❌ 搜索和下载过程中发生错误:', error.message);
+            const totalTime = Date.now() - startTime;
+            console.error(`❌ 搜索和下载过程中发生错误 (耗时: ${totalTime}ms):`, error.message);
+            console.error(`📊 错误堆栈:`, error.stack);
             this.errors.push({
                 type: 'search_error',
                 message: error.message,
@@ -884,6 +932,7 @@ class XiaohongshuScraper {
             console.log('🔍 开始搜索操作...');
             
             // 查找搜索栏
+            console.log('🔍 正在查找搜索栏...');
             const searchSelectors = [
                 'input[placeholder*="搜索"]',
                 'input[placeholder*="小红书"]',
@@ -895,12 +944,14 @@ class XiaohongshuScraper {
             let searchInput = null;
             for (const selector of searchSelectors) {
                 try {
+                    console.log(`🔍 尝试选择器: ${selector}`);
                     searchInput = await this.page.waitForSelector(selector, { timeout: 3000 });
                     if (searchInput) {
                         console.log(`✅ 找到搜索栏: ${selector}`);
                         break;
                     }
                 } catch (error) {
+                    console.log(`⚠️ 选择器 ${selector} 未找到，尝试下一个...`);
                     continue;
                 }
             }
@@ -908,6 +959,7 @@ class XiaohongshuScraper {
             if (!searchInput) {
                 console.log('❌ 未找到搜索栏，尝试直接访问搜索页面');
                 const searchUrl = `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(keyword)}&type=51`;
+                console.log(`🌐 直接访问搜索页面: ${searchUrl}`);
                 await this.page.goto(searchUrl, { 
                     waitUntil: 'domcontentloaded',
                     timeout: 60000
@@ -917,17 +969,20 @@ class XiaohongshuScraper {
             }
             
             // 清空搜索栏并输入关键词
+            console.log('⌨️ 正在输入搜索关键词...');
             await searchInput.click();
             await searchInput.fill('');
             await searchInput.fill(keyword);
             console.log(`✅ 已输入搜索关键词: ${keyword}`);
             
             // 按回车键或点击搜索按钮
+            console.log('🔍 正在执行搜索...');
             try {
                 await searchInput.press('Enter');
                 console.log('✅ 按回车键搜索');
             } catch (error) {
                 // 如果按回车失败，尝试点击搜索按钮
+                console.log('⚠️ 按回车失败，尝试点击搜索按钮...');
                 try {
                     const searchButton = await this.page.waitForSelector('button[type="submit"], .search-btn, [data-testid*="search"] button', { timeout: 3000 });
                     await searchButton.click();
@@ -943,13 +998,16 @@ class XiaohongshuScraper {
             await this.page.waitForTimeout(5000);
             
             // 等待页面稳定
+            console.log('⏳ 等待页面稳定...');
             try {
                 await this.page.waitForLoadState('domcontentloaded', { timeout: 30000 });
+                console.log('✅ 页面加载完成');
             } catch (error) {
                 console.log('⚠️ 页面加载超时，继续执行...');
             }
             
             // 点击"图文"标签
+            console.log('📸 正在点击图文标签...');
             await this.clickImageTab();
             
         } catch (error) {
@@ -1315,16 +1373,30 @@ class XiaohongshuScraper {
      */
     async waitForLogin() {
         console.log('⏳ 等待用户登录...');
-        console.log('💡 请在浏览器中完成登录，登录完成后按任意键继续...');
+        console.log('💡 请在浏览器中完成登录，系统会自动检测登录状态...');
         
-        // 等待用户手动登录
-        await new Promise(resolve => {
-            process.stdin.once('data', () => {
-                resolve();
-            });
-        });
+        // 等待用户手动登录，定期检查登录状态
+        let attempts = 0;
+        const maxAttempts = 60; // 最多等待5分钟
+        const checkInterval = 5000; // 每5秒检查一次
         
-        console.log('✅ 登录完成，继续执行...');
+        while (attempts < maxAttempts) {
+            await this.page.waitForTimeout(checkInterval);
+            attempts++;
+            
+            console.log(`🔍 检查登录状态... (${attempts}/${maxAttempts})`);
+            
+            const isLoggedIn = await this.checkLoginStatus();
+            if (isLoggedIn) {
+                console.log('✅ 检测到登录成功！');
+                return true;
+            }
+            
+            console.log('⏳ 等待登录中...');
+        }
+        
+        console.log('⏰ 等待登录超时');
+        return false;
     }
 
     /**
@@ -1337,9 +1409,11 @@ class XiaohongshuScraper {
             console.log('🔍 正在提取图片链接...');
             
             // 等待内容加载
+            console.log('⏳ 等待页面内容加载...');
             await this.page.waitForTimeout(5000);
             
             // 获取当前页面信息
+            console.log('📊 正在分析页面结构...');
             const pageInfo = await this.page.evaluate(() => {
                 return {
                     url: window.location.href,
@@ -1353,9 +1427,11 @@ class XiaohongshuScraper {
             console.log('📄 当前页面信息:', pageInfo);
             
             // 滚动页面加载更多内容
+            console.log('📜 正在滚动页面加载更多内容...');
             await this.scrollToLoadMore();
             
             // 提取内容卡片和图片信息
+            console.log('🔍 正在提取内容卡片和图片信息...');
             const contentData = await this.page.evaluate(() => {
                 const contents = [];
                 
@@ -1485,16 +1561,11 @@ class XiaohongshuScraper {
                                 if (isLargeEnough && isNotAvatar && isNotSystem && isNotEmoji && isNotAd && isInContentArea) {
                                     let imageUrl = img.src;
                                     
-                                    // 根据配置优化图片URL，尝试获取无水印的原图
-                                    if (this.config.tryRemoveWatermark) {
-                                        imageUrl = this.optimizeImageUrlForWatermarkRemoval(imageUrl);
-                                    } else {
-                                        // 只做基本的URL优化
-                                        if (imageUrl.includes('thumbnail') || imageUrl.includes('thumb')) {
-                                            imageUrl = imageUrl.replace(/thumbnail|thumb/g, 'original');
-                                        }
-                                        imageUrl = imageUrl.replace(/[?&]w=\d+/g, '').replace(/[?&]h=\d+/g, '');
+                                    // 只做基本的URL优化（在page.evaluate内部无法访问this.config）
+                                    if (imageUrl.includes('thumbnail') || imageUrl.includes('thumb')) {
+                                        imageUrl = imageUrl.replace(/thumbnail|thumb/g, 'original');
                                     }
+                                    imageUrl = imageUrl.replace(/[?&]w=\d+/g, '').replace(/[?&]h=\d+/g, '');
                                     
                                     images.push(imageUrl);
                                 }
@@ -1520,9 +1591,10 @@ class XiaohongshuScraper {
             
             console.log(`📸 找到 ${contentData.length} 个内容卡片`);
             
-            // 按点赞数排序，选择前2个最受欢迎的内容
+            // 按点赞数排序，选择前3个最受欢迎的内容
+            console.log('🏆 正在按点赞数排序内容...');
             contentData.sort((a, b) => b.likeCount - a.likeCount);
-            const topContents = contentData.slice(0, 2);
+            const topContents = contentData.slice(0, 3);
             
             console.log('🏆 点赞数最多的内容:');
             topContents.forEach((content, index) => {
@@ -1530,12 +1602,14 @@ class XiaohongshuScraper {
             });
             
             // 提取所有图片
+            console.log('🔄 正在提取所有图片链接...');
             const allImages = [];
             topContents.forEach(content => {
                 allImages.push(...content.images);
             });
             
             // 去重
+            console.log('🔄 正在去重图片链接...');
             const uniqueImages = [...new Set(allImages)];
             
             console.log(`📸 总共提取到 ${uniqueImages.length} 张图片`);
@@ -1543,6 +1617,7 @@ class XiaohongshuScraper {
             // 如果过滤后没有图片，尝试更宽松的过滤条件
             if (uniqueImages.length === 0) {
                 console.log('⚠️ 过滤后没有图片，尝试更宽松的过滤条件...');
+                console.log('🔍 正在使用更宽松的过滤条件搜索图片...');
                 const allPageImages = await this.page.evaluate(() => {
                     const images = [];
                     const imgElements = document.querySelectorAll('img');
@@ -1704,29 +1779,36 @@ class XiaohongshuScraper {
         await fs.ensureDir(restaurantFolder);
         
         console.log(`📁 图片将保存到: ${restaurantFolder}`);
+        console.log(`📸 开始下载 ${imageUrls.length} 张图片...`);
         
         for (let i = 0; i < imageUrls.length; i++) {
             const imageUrl = imageUrls[i];
             
             try {
                 console.log(`⬇️ 正在下载第 ${i + 1}/${imageUrls.length} 张图片...`);
+                console.log(`🔗 图片URL: ${imageUrl.substring(0, 100)}...`);
                 
                 // 获取图片内容
+                console.log(`🌐 正在获取图片内容...`);
                 const response = await this.page.goto(imageUrl);
                 const buffer = await response.body();
+                
+                console.log(`📊 图片大小: ${(buffer.length / 1024).toFixed(2)} KB`);
                 
                 // 生成文件名
                 const fileName = this.generateFileName(imageUrl, i + 1);
                 const filePath = path.join(restaurantFolder, fileName);
                 
                 // 保存图片
+                console.log(`💾 正在保存图片: ${fileName}`);
                 await fs.writeFile(filePath, buffer);
                 
                 // 如果启用了图片处理，尝试去除水印
                 if (this.config.enableImageProcessing) {
                     try {
+                        console.log(`🔄 正在处理图片水印: ${fileName}`);
                         await this.processImageForWatermarkRemoval(filePath);
-                        console.log(`🔄 图片已处理水印: ${fileName}`);
+                        console.log(`✅ 图片水印处理完成: ${fileName}`);
                     } catch (error) {
                         console.log(`⚠️ 图片水印处理失败: ${fileName} - ${error.message}`);
                     }
@@ -1735,7 +1817,12 @@ class XiaohongshuScraper {
                 console.log(`✅ 图片已保存: ${fileName}`);
                 downloadedCount++;
                 
+                // 显示下载进度
+                const progress = Math.round(((i + 1) / imageUrls.length) * 100);
+                console.log(`📈 下载进度: ${progress}% (${i + 1}/${imageUrls.length})`);
+                
                 // 添加延迟避免请求过快
+                console.log(`⏳ 等待 ${this.config.delay}ms 后继续...`);
                 await this.page.waitForTimeout(this.config.delay);
                 
             } catch (error) {
@@ -1747,9 +1834,14 @@ class XiaohongshuScraper {
                     message: error.message,
                     timestamp: new Date().toISOString()
                 });
+                
+                // 显示失败进度
+                const progress = Math.round(((i + 1) / imageUrls.length) * 100);
+                console.log(`📈 下载进度: ${progress}% (${i + 1}/${imageUrls.length}) - 失败: ${failedCount}`);
             }
         }
         
+        console.log(`🎉 图片下载完成! 成功: ${downloadedCount}, 失败: ${failedCount}`);
         return { downloadedCount, failedCount };
     }
 
@@ -1854,6 +1946,190 @@ class XiaohongshuScraper {
     }
 
     /**
+     * 在用户浏览器中打开登录窗口
+     * 连接到用户当前使用的浏览器，在新窗口中打开登录页面
+     * @returns {Promise<Object>} 登录结果
+     */
+    async openLoginWindowInUserBrowser() {
+        let userBrowser = null;
+        let loginPage = null;
+        
+        try {
+            console.log('🌐 正在连接到用户浏览器...');
+            
+            // 尝试连接到用户当前使用的浏览器
+            try {
+                // 尝试连接到Chrome的远程调试端口
+                userBrowser = await chromium.connectOverCDP('http://localhost:9222');
+                console.log('✅ 已连接到用户Chrome浏览器');
+            } catch (error) {
+                console.log('⚠️ 无法连接到用户Chrome浏览器，尝试启动新的浏览器实例...');
+                
+                // 如果无法连接，启动一个新的浏览器实例
+                userBrowser = await chromium.launch({
+                    headless: false, // 显示浏览器窗口
+                    args: [
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-accelerated-2d-canvas',
+                        '--no-first-run',
+                        '--no-zygote',
+                        '--disable-gpu'
+                    ]
+                });
+                console.log('✅ 已启动新的浏览器实例');
+            }
+            
+            // 创建新的页面用于登录
+            loginPage = await userBrowser.newPage();
+            console.log('🆕 已创建新的登录窗口');
+            
+            // 打开小红书登录页面
+            console.log('🌐 正在打开小红书登录页面...');
+            await loginPage.goto('https://www.xiaohongshu.com/login', {
+                waitUntil: 'domcontentloaded',
+                timeout: 30000
+            });
+            console.log('✅ 登录页面已打开，请扫码登录');
+            console.log('⏰ 您有30秒时间完成登录...');
+            
+            // 给用户30秒反应时间
+            await loginPage.waitForTimeout(30000);
+            
+            // 检查登录状态
+            const isLoggedIn = await this.checkLoginStatusOnPage(loginPage);
+            if (isLoggedIn) {
+                console.log('✅ 检测到登录成功！正在获取Cookie...');
+                
+                // 获取Cookie
+                const cookies = await loginPage.context().cookies();
+                console.log('🍪 已获取Cookie，正在保存...');
+                
+                // 保存Cookie到文件
+                await this.saveCookiesFromArray(cookies);
+                console.log('💾 Cookie已保存');
+                
+                // 关闭登录窗口
+                await loginPage.close();
+                console.log('🔒 登录窗口已关闭');
+                
+                return { success: true, message: '登录成功，Cookie已更新' };
+            } else {
+                console.log('⏰ 30秒内未检测到登录，继续等待...');
+                
+                // 继续等待用户手动登录
+                let attempts = 0;
+                const maxAttempts = 60; // 最多等待5分钟
+                const checkInterval = 5000; // 每5秒检查一次
+                
+                while (attempts < maxAttempts) {
+                    await loginPage.waitForTimeout(checkInterval);
+                    attempts++;
+                    
+                    console.log(`🔍 检查登录状态... (${attempts}/${maxAttempts})`);
+                    
+                    const isLoggedIn = await this.checkLoginStatusOnPage(loginPage);
+                    if (isLoggedIn) {
+                        console.log('✅ 检测到登录成功！正在获取Cookie...');
+                        
+                        // 获取Cookie
+                        const cookies = await loginPage.context().cookies();
+                        console.log('🍪 已获取Cookie，正在保存...');
+                        
+                        // 保存Cookie到文件
+                        await this.saveCookiesFromArray(cookies);
+                        console.log('💾 Cookie已保存');
+                        
+                        // 关闭登录窗口
+                        await loginPage.close();
+                        console.log('🔒 登录窗口已关闭');
+                        
+                        return { success: true, message: '登录成功，Cookie已更新' };
+                    }
+                    
+                    console.log('⏳ 等待登录中...');
+                }
+                
+                console.log('⏰ 等待登录超时');
+                return { success: false, error: '登录超时' };
+            }
+            
+        } catch (error) {
+            console.error('❌ 登录过程中发生错误:', error.message);
+            return { success: false, error: error.message };
+        } finally {
+            // 清理资源
+            if (loginPage) {
+                try {
+                    await loginPage.close();
+                } catch (error) {
+                    // 忽略关闭页面的错误
+                }
+            }
+            if (userBrowser && userBrowser !== this.browser) {
+                try {
+                    await userBrowser.close();
+                } catch (error) {
+                    // 忽略关闭浏览器的错误
+                }
+            }
+        }
+    }
+
+    /**
+     * 在指定页面上检查登录状态
+     * @param {Page} page - 要检查的页面
+     * @returns {Promise<boolean>} 是否已登录
+     */
+    async checkLoginStatusOnPage(page) {
+        try {
+            return await page.evaluate(() => {
+                // 检查是否存在用户相关元素
+                const userElements = document.querySelectorAll('.user-info, .user-avatar, .profile, [data-testid*="user"], .user-name, .user-menu');
+                const hasUserElements = userElements.length > 0;
+                
+                // 检查是否存在登录相关元素
+                const loginElements = document.querySelectorAll('.login-btn, .login-button, [data-testid*="login"]');
+                const hasLoginElements = loginElements.length > 0;
+                
+                // 检查页面内容
+                const bodyText = document.body ? document.body.innerText : '';
+                const hasLoginPrompt = bodyText.includes('登录') || 
+                                     bodyText.includes('扫码登录') ||
+                                     bodyText.includes('手机号登录');
+                
+                // 如果存在用户元素且不存在登录元素，则认为已登录
+                return hasUserElements && !hasLoginElements && !hasLoginPrompt;
+            });
+        } catch (error) {
+            console.error('检查登录状态时出错:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * 从Cookie数组保存Cookie到文件
+     * @param {Array} cookies - Cookie数组
+     */
+    async saveCookiesFromArray(cookies) {
+        try {
+            const cookieData = {
+                cookies: cookies,
+                timestamp: new Date().toISOString(),
+                domain: 'xiaohongshu.com'
+            };
+            
+            const cookieFile = this.loginConfig?.cookieFile || './cookies.json';
+            await fs.writeJson(cookieFile, cookieData, { spaces: 2 });
+            console.log(`💾 Cookie已保存到: ${cookieFile}`);
+        } catch (error) {
+            console.error('保存Cookie时出错:', error.message);
+            throw error;
+        }
+    }
+
+    /**
      * 自动刷新Cookie
      * 当检测到用户相关元素缺失时，自动调用refresh-cookies.js来刷新Cookie
      * @returns {Promise<Object>} 刷新结果
@@ -1894,18 +2170,16 @@ class XiaohongshuScraper {
             });
             
             if (needsLogin) {
-                console.log('🔐 检测到需要重新登录，请在浏览器中完成登录...');
-                console.log('⏳ 等待用户完成登录...');
+                console.log('🔐 检测到需要重新登录，正在使用用户浏览器打开登录窗口...');
                 
-                // 等待登录完成
-                const loginSuccess = await this.waitForLogin();
-                if (loginSuccess) {
-                    console.log('✅ 用户登录成功，保存新Cookie...');
-                    await this.saveCookies();
-                    return { success: true, message: '用户登录成功，Cookie已更新' };
+                // 使用用户浏览器打开登录窗口
+                const loginResult = await this.openLoginWindowInUserBrowser();
+                if (loginResult.success) {
+                    console.log('✅ 登录成功，Cookie已更新');
+                    return { success: true, message: '登录成功，Cookie已更新' };
                 } else {
-                    console.log('❌ 用户登录失败或超时');
-                    return { success: false, error: '用户登录失败或超时' };
+                    console.log('❌ 登录失败:', loginResult.error);
+                    return { success: false, error: loginResult.error };
                 }
             } else {
                 console.log('✅ 当前登录状态正常，无需刷新Cookie');

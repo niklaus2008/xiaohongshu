@@ -115,6 +115,9 @@ class WebInterface {
                 console.log(`客户端已断开: ${socket.id}`);
             });
         });
+        
+        // 启动心跳检测
+        this.startHeartbeat();
     }
 
     /**
@@ -141,15 +144,19 @@ class WebInterface {
                 });
             }
             
-            // 检查是否已有任务在运行
+            // 检查是否已有任务在运行，如果有则清空
             if (this.batchProcessor && this.batchProcessor.isRunning()) {
-                return res.status(400).json({
-                    success: false,
-                    error: '已有任务在运行中，请先停止当前任务'
-                });
+                console.log('🔄 检测到未完成的任务，正在清空...');
+                try {
+                    await this.batchProcessor.stop();
+                    console.log('✅ 已清空之前的未完成任务');
+                } catch (error) {
+                    console.log('⚠️ 清空任务时出现警告:', error.message);
+                }
             }
             
             // 创建批量处理器
+            console.log('🔧 正在创建批量处理器...');
             this.batchProcessor = new BatchProcessor({
                 restaurants,
                 outputPath,
@@ -158,7 +165,15 @@ class WebInterface {
             });
             
             // 开始处理
+            console.log('🚀 正在启动批量处理任务...');
             await this.batchProcessor.start();
+            
+            // 发送启动成功消息
+            this.io.emit('log', {
+                timestamp: new Date().toISOString(),
+                level: 'info',
+                message: '服务状态:任务已启动'
+            });
             
             res.json({
                 success: true,
@@ -470,6 +485,38 @@ class WebInterface {
     sendCurrentStatus(socket) {
         const status = this.getCurrentStatus();
         socket.emit('status', status);
+    }
+    
+    /**
+     * 启动心跳检测
+     * @private
+     */
+    startHeartbeat() {
+        // 每30秒发送一次心跳检测
+        setInterval(() => {
+            if (this.batchProcessor && this.batchProcessor.isRunning()) {
+                const status = this.getCurrentStatus();
+                this.io.emit('heartbeat', {
+                    timestamp: new Date().toISOString(),
+                    status: status,
+                    message: '服务状态:心跳检测正常'
+                });
+                console.log('💓 心跳检测: 服务运行正常');
+            }
+        }, 30000); // 30秒间隔
+        
+        // 每5分钟发送一次详细状态更新
+        setInterval(() => {
+            if (this.batchProcessor && this.batchProcessor.isRunning()) {
+                const status = this.getCurrentStatus();
+                this.io.emit('detailed_status', {
+                    timestamp: new Date().toISOString(),
+                    status: status,
+                    message: '服务状态:详细状态更新'
+                });
+                console.log('📊 详细状态更新: 服务运行正常');
+            }
+        }, 300000); // 5分钟间隔
     }
 
     /**

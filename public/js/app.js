@@ -441,6 +441,31 @@ class XiaohongshuDownloaderApp {
             return;
         }
         
+        // 清空之前的未完成任务并给用户提示
+        this.addLog('🧹 正在清空之前的未完成任务...', 'info');
+        this.addLog('📋 准备开始新的下载任务', 'info');
+        
+        // 重置状态
+        this.currentStatus = {
+            isRunning: false,
+            isPaused: false,
+            progress: 0,
+            currentRestaurant: null,
+            totalRestaurants: 0,
+            completedRestaurants: 0,
+            failedRestaurants: 0,
+            totalImages: 0,
+            downloadedImages: 0,
+            failedImages: 0,
+            restaurantProgress: []
+        };
+        
+        // 清空日志（可选，保留最近的日志）
+        if (this.logs.length > 50) {
+            this.logs = this.logs.slice(-20); // 保留最近20条日志
+            this.addLog('📝 已清理旧日志，保留最近记录', 'info');
+        }
+        
         const options = {
             maxImages: parseInt(document.getElementById('maxImages').value) || 10,
             delay: parseInt(document.getElementById('delay').value) || 2000,
@@ -451,8 +476,8 @@ class XiaohongshuDownloaderApp {
         
         try {
             // 添加服务状态日志
-            this.addLog('服务状态：正在启动下载任务', 'info');
-            this.addLog(`服务状态：准备处理 ${this.restaurants.length} 个餐馆`, 'info');
+            this.addLog('🚀 服务状态：正在启动下载任务', 'info');
+            this.addLog(`📊 服务状态：准备处理 ${this.restaurants.length} 个餐馆`, 'info');
             
             const response = await fetch('/api/start', {
                 method: 'POST',
