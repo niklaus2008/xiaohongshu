@@ -53,6 +53,9 @@ cp config.template.json config.json
     "autoLogin": true,         // 启用自动登录
     "saveCookies": true,       // 保存Cookie
     "cookieFile": "./cookies.json"
+  },
+  "scraper": {
+    "browserType": "chromium"  // 浏览器类型：chromium（默认）、user-browser
   }
 }
 ```
@@ -63,7 +66,14 @@ cp config.template.json config.json
 npm run start:web
 ```
 
-启动后，在浏览器中访问：`http://localhost:3000`
+启动后，系统会自动用Chromium浏览器打开：`http://localhost:3000`
+
+**自动打开浏览器功能**：
+- ✅ 服务启动后自动用Chromium浏览器打开Web界面
+- ✅ 优先使用Playwright的Chromium浏览器
+- ✅ 如果Chromium启动失败，自动回退到系统默认浏览器
+- ✅ 延迟2秒打开，确保服务器完全启动
+- ✅ 如果自动打开失败，不影响服务正常运行
 
 ### 4. 使用Web界面
 
@@ -202,6 +212,9 @@ cp config.template.json config.json
     "autoLogin": true,         // 是否启用自动登录
     "saveCookies": true,       // 是否保存Cookie
     "cookieFile": "./cookies.json"  // Cookie保存文件
+  },
+  "scraper": {
+    "browserType": "chromium"  // 浏览器类型: "chromium"(默认), "user-browser"(用户当前浏览器)
   }
 }
 ```
@@ -236,7 +249,8 @@ const scraper = new XiaohongshuScraper({
   delay: 2000, // 请求间隔（毫秒）
   timeout: 30000, // 页面加载超时时间
   tryRemoveWatermark: true, // 启用水印去除
-  enableImageProcessing: true // 启用图片后处理
+  enableImageProcessing: true, // 启用图片后处理
+  browserType: 'chromium' // 使用Chromium浏览器（默认）
 });
 ```
 
@@ -256,6 +270,7 @@ const scraper = new XiaohongshuScraper({
 | userAgent | string | 默认UA | 浏览器User-Agent |
 | tryRemoveWatermark | boolean | true | 是否尝试去除水印 |
 | enableImageProcessing | boolean | true | 是否启用图片后处理 |
+| browserType | string | 'chromium' | 浏览器类型：'chromium'（默认）、'user-browser' |
 
 #### 主要方法
 
@@ -489,6 +504,30 @@ const scraper = new XiaohongshuScraper({
 - 详细的错误日志记录
 
 ## 更新日志
+
+### v2.0.7 - Chromium浏览器自动打开版本
+- 🌐 **Chromium浏览器自动打开功能**
+  - 服务启动后自动用Chromium浏览器打开Web界面
+  - 优先使用Playwright的Chromium浏览器
+  - 如果Chromium启动失败，自动回退到系统默认浏览器
+  - 延迟2秒打开，确保服务器完全启动
+  - 添加autoOpenBrowser配置选项，默认为true
+  - 完善的错误处理，打开失败不影响服务运行
+- 🎯 **用户体验优化**
+  - 无需手动打开浏览器访问地址
+  - 自动使用Chromium浏览器，与爬虫功能保持一致
+  - 提供详细的日志信息和回退机制
+
+### v2.0.6 - 浏览器配置优化版本
+- 🌐 **浏览器配置优化**
+  - 明确配置默认使用Chromium浏览器
+  - 在配置文件中添加browserType配置项
+  - 支持两种浏览器类型：'chromium'（默认）、'user-browser'
+  - 更新配置模板和文档，确保用户明确了解浏览器配置选项
+- 📝 **文档更新**
+  - 在README.md中添加浏览器类型配置说明
+  - 更新API文档，添加browserType参数说明
+  - 完善配置示例，包含浏览器类型配置
 
 ### v2.0.5 - 日志重复打印修复版本
 - 🐛 **日志重复打印修复**

@@ -6,13 +6,14 @@
     "saveCookies": true,
     "cookieFile": "./cookies.json"
   },
-        "scraper": {
-            "downloadPath": "./downloads",
-            "maxImages": 20,
-            "headless": false,
-            "delay": 2000,
-            "timeout": 30000,
-            "tryRemoveWatermark": true,
-            "preferOriginalImages": true
-        }
+  "scraper": {
+    "downloadPath": "./downloads",
+    "maxImages": 20,
+    "headless": false,
+    "delay": 2000,
+    "timeout": 30000,
+    "tryRemoveWatermark": true,
+    "preferOriginalImages": true,
+    "browserType": "chromium"
+  }
 }

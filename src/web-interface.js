@@ -12,6 +12,8 @@ const socketIo = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs-extra');
+const { exec } = require('child_process');
+const { chromium } = require('playwright');
 const { BatchProcessor } = require('./batch-processor');
 const { getLogger } = require('./logger');
 
@@ -21,10 +23,12 @@ class WebInterface {
      * @param {Object} options - 配置选项
      * @param {number} options.port - 服务器端口
      * @param {string} options.host - 服务器主机
+     * @param {boolean} options.autoOpenBrowser - 是否自动打开浏览器
      */
     constructor(options = {}) {
         this.port = options.port || 3000;
         this.host = options.host || 'localhost';
+        this.autoOpenBrowser = options.autoOpenBrowser !== undefined ? options.autoOpenBrowser : true;
         this.app = express();
         this.server = http.createServer(this.app);
         this.io = socketIo(this.server, {
@@ -646,6 +650,92 @@ class WebInterface {
     }
 
     /**
+     * 自动打开浏览器（使用Chromium）
+     * @private
+     * @param {string} url - 要打开的URL
+     */
+    async openBrowser(url) {
+        try {
+            console.log(`🌐 正在使用Chromium浏览器打开: ${url}`);
+            this.logger.sendServiceLog(`正在使用Chromium浏览器打开: ${url}`, 'info');
+            
+            // 使用Playwright启动Chromium浏览器
+            const browser = await chromium.launch({
+                headless: false, // 显示浏览器窗口
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--disable-gpu'
+                ]
+            });
+            
+            // 创建新页面并导航到指定URL
+            const page = await browser.newPage();
+            await page.goto(url, { 
+                waitUntil: 'networkidle',
+                timeout: 30000 
+            });
+            
+            // 保存浏览器实例，以便后续使用
+            this.browserInstance = browser;
+            this.browserPage = page;
+            
+            console.log(`✅ Chromium浏览器已打开: ${url}`);
+            this.logger.sendSuccessLog(`Chromium浏览器已打开: ${url}`);
+            
+        } catch (error) {
+            console.log(`⚠️ 使用Chromium打开浏览器失败: ${error.message}`);
+            this.logger.sendWarningLog(`使用Chromium打开浏览器失败: ${error.message}`);
+            
+            // 如果Chromium打开失败，回退到系统默认浏览器
+            console.log(`🔄 回退到系统默认浏览器...`);
+            this.logger.sendServiceLog('回退到系统默认浏览器', 'warning');
+            this.openSystemBrowser(url);
+        }
+    }
+
+    /**
+     * 使用系统默认浏览器打开（回退方案）
+     * @private
+     * @param {string} url - 要打开的URL
+     */
+    async openSystemBrowser(url) {
+        try {
+            let command;
+            const platform = process.platform;
+            
+            if (platform === 'darwin') {
+                // macOS
+                command = `open "${url}"`;
+            } else if (platform === 'win32') {
+                // Windows
+                command = `start "${url}"`;
+            } else {
+                // Linux和其他Unix系统
+                command = `xdg-open "${url}"`;
+            }
+            
+            exec(command, (error, stdout, stderr) => {
+                if (error) {
+                    console.log(`⚠️ 系统浏览器打开失败: ${error.message}`);
+                    this.logger.sendWarningLog(`系统浏览器打开失败: ${error.message}`);
+                } else {
+                    console.log(`✅ 系统浏览器已打开: ${url}`);
+                    this.logger.sendSuccessLog(`系统浏览器已打开: ${url}`);
+                }
+            });
+            
+        } catch (error) {
+            console.log(`⚠️ 系统浏览器打开时出现错误: ${error.message}`);
+            this.logger.sendWarningLog(`系统浏览器打开时出现错误: ${error.message}`);
+        }
+    }
+
+    /**
      * 启动服务器
      */
     async start() {
@@ -660,6 +750,15 @@ class WebInterface {
                 console.log(`⏹️  按 Ctrl+C 停止服务器`);
                 this.logger.sendServiceLog('Web界面服务器已启动', 'success');
                 this.logger.sendServiceLog(`访问地址: http://${this.host}:${this.port}`, 'info');
+                
+                // 自动打开浏览器
+                if (this.autoOpenBrowser) {
+                    const url = `http://${this.host}:${this.port}`;
+                    // 延迟2秒后打开浏览器，确保服务器完全启动
+                    setTimeout(() => {
+                        this.openBrowser(url);
+                    }, 2000);
+                }
             });
             
             // 优雅关闭
@@ -677,6 +776,187 @@ class WebInterface {
     }
 
     /**
+     * 处理打开浏览器请求
+     * @param {Object} req - 请求对象
+     * @param {Object} res - 响应对象
+     */
+    async handleOpenBrowser(req, res) {
+        try {
+            const { url } = req.body;
+            
+            if (!url || typeof url !== 'string') {
+                return res.status(400).json({
+                    success: false,
+                    error: '请提供有效的URL'
+                });
+            }
+            
+            console.log(`🌐 正在使用用户当前浏览器打开: ${url}`);
+            this.logger.sendServiceLog(`正在使用用户当前浏览器打开: ${url}`, 'info');
+            
+            let browserSource = 'unknown';
+            let isUserBrowser = false;
+            
+            // 检查是否有现有的浏览器实例
+            if (!this.browserInstance) {
+                console.log('🔧 尝试连接到用户当前浏览器...');
+                this.logger.sendServiceLog('尝试连接到用户当前浏览器', 'info');
+                
+                // 尝试连接到用户当前浏览器
+                this.browserInstance = await this.connectToUserBrowser();
+                
+                if (!this.browserInstance) {
+                    console.log('🔧 无法连接到用户浏览器，创建新的浏览器实例...');
+                    this.logger.sendServiceLog('无法连接到用户浏览器，创建新的浏览器实例', 'warning');
+                    
+                    // 创建新的浏览器实例
+                    const { XiaohongshuScraper } = require('./xiaohongshu-scraper');
+                    const scraper = new XiaohongshuScraper({
+                        headless: false, // 显示浏览器窗口
+                        login: {
+                            method: 'manual',
+                            autoLogin: true,
+                            saveCookies: true,
+                            cookieFile: './cookies.json'
+                        }
+                    });
+                    
+                    // 初始化浏览器
+                    await scraper.initBrowser();
+                    this.browserInstance = scraper.browser;
+                    browserSource = 'new_instance';
+                    
+                    console.log('✅ 浏览器实例创建成功');
+                    this.logger.sendServiceLog('浏览器实例创建成功', 'success');
+                } else {
+                    console.log('✅ 成功连接到用户当前浏览器');
+                    this.logger.sendServiceLog('成功连接到用户当前浏览器', 'success');
+                    browserSource = 'user_browser';
+                    isUserBrowser = true;
+                }
+            } else {
+                console.log('♻️ 复用现有浏览器实例');
+                this.logger.sendServiceLog('复用现有浏览器实例', 'info');
+                browserSource = 'existing_instance';
+            }
+            
+            // 创建新页面并打开指定URL
+            try {
+                this.browserPage = await this.browserInstance.newPage();
+                
+                // 设置页面超时和用户代理
+                await this.browserPage.setDefaultTimeout(30000);
+                await this.browserPage.setExtraHTTPHeaders({
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                });
+                
+                await this.browserPage.goto(url, { 
+                    waitUntil: 'networkidle',
+                    timeout: 30000 
+                });
+                
+                console.log(`✅ 已使用用户当前浏览器打开: ${url}`);
+                this.logger.sendServiceLog(`已使用用户当前浏览器打开: ${url}`, 'success');
+                
+                // 如果是用户浏览器，提示用户完成登录
+                if (isUserBrowser) {
+                    this.logger.sendServiceLog('💡 请在打开的浏览器中完成小红书登录，然后点击"检查登录状态"', 'info');
+                }
+                
+                res.json({
+                    success: true,
+                    message: '已使用用户当前浏览器打开页面',
+                    data: {
+                        url: url,
+                        timestamp: new Date().toISOString(),
+                        browserSource: browserSource,
+                        isUserBrowser: isUserBrowser,
+                        browserReused: !!this.browserInstance
+                    }
+                });
+                
+            } catch (pageError) {
+                console.error('打开页面失败:', pageError);
+                this.logger.sendErrorLog('打开页面失败', pageError);
+                
+                // 如果页面打开失败，尝试重新连接浏览器
+                if (isUserBrowser) {
+                    console.log('🔄 页面打开失败，尝试重新连接用户浏览器...');
+                    this.logger.sendServiceLog('页面打开失败，尝试重新连接用户浏览器', 'warning');
+                    
+                    try {
+                        this.browserInstance = await this.connectToUserBrowser();
+                        if (this.browserInstance) {
+                            this.browserPage = await this.browserInstance.newPage();
+                            await this.browserPage.goto(url, { 
+                                waitUntil: 'networkidle',
+                                timeout: 30000 
+                            });
+                            
+                            console.log(`✅ 重新连接成功，已打开: ${url}`);
+                            this.logger.sendServiceLog(`重新连接成功，已打开: ${url}`, 'success');
+                            
+                            res.json({
+                                success: true,
+                                message: '重新连接成功，已打开页面',
+                                data: {
+                                    url: url,
+                                    timestamp: new Date().toISOString(),
+                                    browserSource: 'reconnected_user_browser',
+                                    isUserBrowser: true,
+                                    browserReused: false
+                                }
+                            });
+                            return;
+                        }
+                    } catch (reconnectError) {
+                        console.error('重新连接失败:', reconnectError);
+                        this.logger.sendErrorLog('重新连接失败', reconnectError);
+                    }
+                }
+                
+                throw pageError;
+            }
+            
+        } catch (error) {
+            console.error('打开浏览器失败:', error);
+            this.logger.sendErrorLog('打开浏览器失败', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * 处理浏览器状态查询请求
+     * @param {Object} req - 请求对象
+     * @param {Object} res - 响应对象
+     */
+    async handleBrowserStatus(req, res) {
+        try {
+            const isBrowserActive = !!this.browserInstance;
+            const isPageActive = !!this.browserPage;
+            
+            res.json({
+                success: true,
+                data: {
+                    browserActive: isBrowserActive,
+                    pageActive: isPageActive,
+                    timestamp: new Date().toISOString()
+                }
+            });
+        } catch (error) {
+            console.error('获取浏览器状态失败:', error);
+            this.logger.sendErrorLog('获取浏览器状态失败', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
+
+    /**
      * 停止服务器
      */
     async stop() {
@@ -684,6 +964,17 @@ class WebInterface {
             // 停止批量处理器
             if (this.batchProcessor) {
                 await this.batchProcessor.stop();
+            }
+            
+            // 关闭浏览器实例
+            if (this.browserInstance) {
+                console.log('🔒 正在关闭浏览器实例...');
+                this.logger.sendServiceLog('正在关闭浏览器实例', 'info');
+                await this.browserInstance.close();
+                this.browserInstance = null;
+                this.browserPage = null;
+                console.log('✅ 浏览器实例已关闭');
+                this.logger.sendServiceLog('浏览器实例已关闭', 'success');
             }
             
             // 关闭服务器

@@ -25,6 +25,7 @@ class XiaohongshuScraper {
      * @param {number} options.delay - 请求间隔时间（毫秒）
      * @param {number} options.timeout - 页面加载超时时间
      * @param {string} options.userAgent - 浏览器User-Agent
+     * @param {string} options.browserType - 浏览器类型，可选值：'chromium'（默认）、'user-browser'
      */
     constructor(options = {}) {
         this.config = {
@@ -35,7 +36,8 @@ class XiaohongshuScraper {
             timeout: options.timeout || 30000,
             userAgent: options.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             tryRemoveWatermark: options.tryRemoveWatermark !== undefined ? options.tryRemoveWatermark : true,
-            enableImageProcessing: options.enableImageProcessing !== undefined ? options.enableImageProcessing : true
+            enableImageProcessing: options.enableImageProcessing !== undefined ? options.enableImageProcessing : true,
+            browserType: options.browserType || 'chromium'
         };
         
         // 登录配置
