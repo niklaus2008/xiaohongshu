@@ -1699,7 +1699,7 @@ class XiaohongshuScraper {
         // 创建餐馆专用文件夹
         const restaurantFolder = path.join(
             this.config.downloadPath, 
-            this.sanitizeFileName(`${restaurantName}_${location}`)
+            this.sanitizeFileName(restaurantName)
         );
         await fs.ensureDir(restaurantFolder);
         

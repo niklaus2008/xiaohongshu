@@ -48,16 +48,20 @@ class XiaohongshuDownloaderApp {
         this.socket.on('connect', () => {
             console.log('已连接到服务器');
             this.addLog('已连接到服务器', 'success');
+            this.addLog('服务状态：正常运行', 'info');
         });
         
         this.socket.on('disconnect', () => {
             console.log('与服务器断开连接');
             this.addLog('与服务器断开连接', 'warning');
+            this.addLog('服务状态：连接中断', 'warning');
         });
         
         this.socket.on('status', (status) => {
             this.currentStatus = status;
             this.updateStatusUI();
+            // 添加服务状态日志
+            this.addServiceStatusLogs(status);
         });
         
         this.socket.on('log', (logEntry) => {
@@ -66,7 +70,11 @@ class XiaohongshuDownloaderApp {
         
         this.socket.on('error', (error) => {
             this.showError(error.message || '发生未知错误');
+            this.addLog('服务状态：出现错误', 'error');
         });
+        
+        // 添加服务心跳检测
+        this.startServiceHeartbeat();
     }
 
     /**
@@ -159,12 +167,12 @@ class XiaohongshuDownloaderApp {
             title.textContent = '编辑餐馆';
             document.getElementById('restaurantName').value = restaurant.name;
             document.getElementById('restaurantLocation').value = restaurant.location;
-            document.getElementById('restaurantMaxImages').value = restaurant.maxImages || 6;
+            document.getElementById('restaurantMaxImages').value = restaurant.maxImages || 10;
         } else {
             // 新增模式
             title.textContent = '添加餐馆';
             document.getElementById('restaurantForm').reset();
-            document.getElementById('restaurantMaxImages').value = 6;
+            document.getElementById('restaurantMaxImages').value = 10;
         }
         
         modal.show();
@@ -176,7 +184,7 @@ class XiaohongshuDownloaderApp {
     saveRestaurant() {
         const name = document.getElementById('restaurantName').value.trim();
         const location = document.getElementById('restaurantLocation').value.trim();
-        const maxImages = parseInt(document.getElementById('restaurantMaxImages').value) || 6;
+        const maxImages = parseInt(document.getElementById('restaurantMaxImages').value) || 10;
         
         if (!name || !location) {
             this.showError('请填写餐馆名称和地点');
@@ -324,7 +332,14 @@ class XiaohongshuDownloaderApp {
                     this.addLog(`警告：跳过了 ${importedRestaurants.length - validRestaurants.length} 个无效的餐馆数据`, 'warning');
                 }
                 
-                // 合并到现有列表
+                // 检查是否清空之前的任务
+                const clearExisting = document.getElementById('clearExisting').checked;
+                if (clearExisting) {
+                    this.restaurants = [];
+                    this.addLog('已清空之前的任务', 'info');
+                }
+                
+                // 添加新导入的餐馆
                 this.restaurants.push(...validRestaurants);
                 this.addLog(`成功导入 ${validRestaurants.length} 个餐馆`, 'success');
                 this.updateRestaurantsList();
@@ -337,6 +352,36 @@ class XiaohongshuDownloaderApp {
         };
         
         reader.readAsText(file);
+    }
+
+    /**
+     * 解析CSV行，正确处理引号内的逗号
+     * @param {string} line - CSV行
+     * @returns {Array} 分割后的字段数组
+     */
+    parseCSVLine(line) {
+        const result = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            
+            if (char === '"') {
+                inQuotes = !inQuotes;
+            } else if (char === ',' && !inQuotes) {
+                result.push(current.trim());
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        
+        // 添加最后一个字段
+        result.push(current.trim());
+        
+        // 移除字段两端的引号
+        return result.map(field => field.replace(/^"|"$/g, ''));
     }
 
     /**
@@ -353,7 +398,8 @@ class XiaohongshuDownloaderApp {
             const line = lines[i].trim();
             if (!line) continue;
             
-            const parts = line.split(',').map(part => part.trim().replace(/^"|"$/g, ''));
+            // 改进的CSV解析，正确处理引号内的逗号
+            const parts = this.parseCSVLine(line);
             
             if (parts.length < 2) {
                 errors.push(`第${i + 1}行格式不正确：缺少地点信息。正确格式：餐馆名称,地点,下载的图片数(可选)`);
@@ -368,7 +414,7 @@ class XiaohongshuDownloaderApp {
             restaurants.push({
                 name: parts[0],
                 location: parts[1],
-                maxImages: parseInt(parts[2]) || 6
+                maxImages: parseInt(parts[2]) || 10
             });
         }
         
@@ -396,7 +442,7 @@ class XiaohongshuDownloaderApp {
         }
         
         const options = {
-            maxImages: parseInt(document.getElementById('maxImages').value) || 6,
+            maxImages: parseInt(document.getElementById('maxImages').value) || 10,
             delay: parseInt(document.getElementById('delay').value) || 2000,
             tryRemoveWatermark: document.getElementById('removeWatermark').checked,
             enableImageProcessing: document.getElementById('enableProcessing').checked,
@@ -404,6 +450,10 @@ class XiaohongshuDownloaderApp {
         };
         
         try {
+            // 添加服务状态日志
+            this.addLog('服务状态：正在启动下载任务', 'info');
+            this.addLog(`服务状态：准备处理 ${this.restaurants.length} 个餐馆`, 'info');
+            
             const response = await fetch('/api/start', {
                 method: 'POST',
                 headers: {
@@ -420,12 +470,15 @@ class XiaohongshuDownloaderApp {
             
             if (result.success) {
                 this.addLog('批量下载任务已开始', 'success');
+                this.addLog('服务状态：任务队列已启动', 'success');
             } else {
                 this.showError(result.error || '启动任务失败');
+                this.addLog('服务状态：任务启动失败', 'error');
             }
             
         } catch (error) {
             this.showError(`启动任务失败: ${error.message}`);
+            this.addLog('服务状态：任务启动异常', 'error');
         }
     }
 
@@ -451,7 +504,7 @@ class XiaohongshuDownloaderApp {
         const config = {
             restaurants: this.restaurants,
             outputPath: document.getElementById('outputPath').value,
-            maxImages: parseInt(document.getElementById('maxImages').value) || 6,
+            maxImages: parseInt(document.getElementById('maxImages').value) || 10,
             delay: parseInt(document.getElementById('delay').value) || 2000,
             tryRemoveWatermark: document.getElementById('removeWatermark').checked,
             enableImageProcessing: document.getElementById('enableProcessing').checked,
@@ -571,6 +624,7 @@ class XiaohongshuDownloaderApp {
      */
     updateRestaurantsProgress() {
         const container = document.getElementById('restaurantsProgress');
+        const summaryElement = document.getElementById('progressSummary');
         
         if (this.restaurants.length === 0) {
             container.innerHTML = `
@@ -579,22 +633,33 @@ class XiaohongshuDownloaderApp {
                     暂无餐馆配置
                 </div>
             `;
+            if (summaryElement) summaryElement.textContent = '0/0 完成';
             return;
         }
+        
+        // 计算完成数量
+        let completedCount = 0;
+        let totalCount = this.restaurants.length;
         
         // 如果没有进度信息，显示初始状态
         if (!this.currentStatus.restaurantProgress || this.currentStatus.restaurantProgress.length === 0) {
             container.innerHTML = this.restaurants.map((restaurant, index) => `
-                <div class="restaurant-progress-item mb-3">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <span class="restaurant-name">${this.escapeHtml(restaurant.name)} (${this.escapeHtml(restaurant.location)})</span>
-                        <span class="badge bg-secondary">等待中</span>
+                <div class="restaurant-progress-item">
+                    <div class="restaurant-info">
+                        <div class="restaurant-name">${this.escapeHtml(restaurant.name)} (${this.escapeHtml(restaurant.location)})</div>
                     </div>
-                    <div class="progress" style="height: 8px;">
-                        <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                    <div class="restaurant-progress">
+                        <div class="progress">
+                            <div class="progress-bar bg-secondary" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <div class="progress-text">0/0</div>
+                        <span class="status-badge">
+                            <span class="badge bg-secondary">等待中</span>
+                        </span>
                     </div>
                 </div>
             `).join('');
+            if (summaryElement) summaryElement.textContent = `0/${totalCount} 完成`;
             return;
         }
         
@@ -614,6 +679,7 @@ class XiaohongshuDownloaderApp {
                 case 'completed':
                     statusBadge = '<span class="badge bg-success">已完成</span>';
                     progressClass = 'bg-success';
+                    completedCount++;
                     break;
                 case 'processing':
                     statusBadge = '<span class="badge bg-primary">处理中</span>';
@@ -629,18 +695,27 @@ class XiaohongshuDownloaderApp {
             }
             
             return `
-                <div class="restaurant-progress-item mb-3">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <span class="restaurant-name">${this.escapeHtml(restaurant.name)} (${this.escapeHtml(restaurant.location)})</span>
-                        ${statusBadge}
+                <div class="restaurant-progress-item">
+                    <div class="restaurant-info">
+                        <div class="restaurant-name">${this.escapeHtml(restaurant.name)} (${this.escapeHtml(restaurant.location)})</div>
                     </div>
-                    <div class="progress" style="height: 8px;">
-                        <div class="progress-bar ${progressClass}" role="progressbar" style="width: ${progress.progress}%"></div>
+                    <div class="restaurant-progress">
+                        <div class="progress">
+                            <div class="progress-bar ${progressClass}" role="progressbar" style="width: ${progress.progress}%"></div>
+                        </div>
+                        <div class="progress-text">${progress.downloaded || 0}/${progress.images || 0}</div>
+                        <span class="status-badge">
+                            ${statusBadge}
+                        </span>
                     </div>
-                    <small class="text-muted">${progress.downloaded || 0} / ${progress.images || 0} 张图片</small>
                 </div>
             `;
         }).join('');
+        
+        // 更新进度摘要
+        if (summaryElement) {
+            summaryElement.textContent = `${completedCount}/${totalCount} 完成`;
+        }
     }
 
     /**
@@ -807,6 +882,10 @@ class XiaohongshuDownloaderApp {
         if (this.restaurants.length === 0) {
             this.addLog('提示：请添加餐馆配置或导入餐馆列表文件', 'info');
         }
+        
+        // 添加服务启动日志
+        this.addLog('服务状态：Web界面已启动', 'success');
+        this.addLog('服务状态：等待用户操作', 'info');
     }
 
     /**
@@ -1105,6 +1184,75 @@ class XiaohongshuDownloaderApp {
                 console.error('检查登录状态失败:', error);
                 startBtn.disabled = true;
             });
+    }
+
+    /**
+     * 添加服务状态日志
+     * @param {Object} status - 服务状态对象
+     */
+    addServiceStatusLogs(status) {
+        // 只在状态变化时添加日志，避免重复
+        if (!this.lastServiceStatus) {
+            this.lastServiceStatus = {};
+        }
+
+        // 检查运行状态变化
+        if (this.lastServiceStatus.isRunning !== status.isRunning) {
+            if (status.isRunning) {
+                this.addLog('服务状态：开始处理任务', 'info');
+            } else {
+                this.addLog('服务状态：任务处理完成', 'success');
+            }
+        }
+
+        // 检查暂停状态变化
+        if (this.lastServiceStatus.isPaused !== status.isPaused) {
+            if (status.isPaused) {
+                this.addLog('服务状态：任务已暂停', 'warning');
+            } else if (status.isRunning) {
+                this.addLog('服务状态：任务已恢复', 'info');
+            }
+        }
+
+        // 检查当前餐馆变化
+        if (this.lastServiceStatus.currentRestaurant !== status.currentRestaurant) {
+            if (status.currentRestaurant) {
+                this.addLog(`服务状态：正在处理 ${status.currentRestaurant.name}`, 'info');
+            }
+        }
+
+        // 更新最后状态
+        this.lastServiceStatus = { ...status };
+    }
+
+    /**
+     * 启动服务心跳检测
+     */
+    startServiceHeartbeat() {
+        // 每30秒发送一次心跳检测
+        this.heartbeatInterval = setInterval(() => {
+            if (this.socket && this.socket.connected) {
+                this.socket.emit('ping');
+                this.addLog('服务状态：心跳检测正常', 'info');
+            } else {
+                this.addLog('服务状态：心跳检测失败', 'warning');
+            }
+        }, 30000);
+
+        // 监听心跳响应
+        this.socket.on('pong', () => {
+            // 心跳响应，不添加日志避免刷屏
+        });
+    }
+
+    /**
+     * 停止服务心跳检测
+     */
+    stopServiceHeartbeat() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+        }
     }
 }
 

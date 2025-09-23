@@ -3,21 +3,21 @@
     {
       "name": "广仔阿福鸡煲(合生汇店)",
       "location": "北京九龙山",
-      "maxImages": 6
+      "maxImages": 10
     },
     {
       "name": "便宜坊",
       "location": "北京朝阳公园店",
-      "maxImages": 6
+      "maxImages": 10
     },
     {
-      "name": "店)  ",
+      "name": "北新桥红焖羊肉·火锅·烧烤(团结湖店)",
       "location": "朝阳公园/团结湖",
-      "maxImages": 6
+      "maxImages": 10
     }
   ],
-  "outputPath": "./downloads",
-  "maxImages": 6,
+  "outputPath": "/Users/liuqiang/Downloads",
+  "maxImages": 10,
   "delay": 2000,
   "tryRemoveWatermark": true,
   "enableImageProcessing": true,
