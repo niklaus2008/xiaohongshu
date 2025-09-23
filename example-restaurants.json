@@ -1,0 +1,17 @@
+[
+  {
+    "name": "海底捞",
+    "location": "北京朝阳区",
+    "maxImages": 6
+  },
+  {
+    "name": "星巴克",
+    "location": "上海徐汇区",
+    "maxImages": 8
+  },
+  {
+    "name": "麦当劳",
+    "location": "深圳南山区",
+    "maxImages": 4
+  }
+]

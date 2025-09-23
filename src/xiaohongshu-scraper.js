@@ -65,13 +65,46 @@ class XiaohongshuScraper {
     }
 
     /**
-     * 初始化浏览器
+     * 启动用户当前浏览器
      * @private
      */
-    async initBrowser() {
+    async launchUserBrowser() {
         try {
-            console.log('🚀 正在启动浏览器...');
-            this.browser = await chromium.launch({
+            // 尝试连接到用户当前浏览器
+            // 这里我们使用一个简单的方法：打开一个新的标签页
+            const { exec } = require('child_process');
+            const { promisify } = require('util');
+            const execAsync = promisify(exec);
+            
+            // 检测操作系统并打开浏览器
+            const platform = process.platform;
+            let command;
+            
+            if (platform === 'darwin') {
+                // macOS
+                command = 'open -a "Google Chrome" --args --remote-debugging-port=9222';
+            } else if (platform === 'win32') {
+                // Windows
+                command = 'start chrome --remote-debugging-port=9222';
+            } else {
+                // Linux
+                command = 'google-chrome --remote-debugging-port=9222';
+            }
+            
+            console.log('🌐 正在启动用户浏览器...');
+            await execAsync(command);
+            
+            // 等待浏览器启动
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // 连接到已存在的浏览器
+            const browser = await chromium.connectOverCDP('http://localhost:9222');
+            return browser;
+            
+        } catch (error) {
+            console.log('⚠️ 无法连接到用户浏览器，使用默认浏览器');
+            // 如果无法连接到用户浏览器，回退到默认浏览器
+            return await chromium.launch({
                 headless: this.config.headless,
                 args: [
                     '--no-sandbox',
@@ -83,6 +116,42 @@ class XiaohongshuScraper {
                     '--disable-gpu'
                 ]
             });
+        }
+    }
+
+    /**
+     * 初始化浏览器
+     * @private
+     */
+    async initBrowser() {
+        try {
+            console.log('🚀 正在启动浏览器...');
+            
+            // 检查是否指定了用户浏览器
+            const browserType = this.config.browserType || 'chromium';
+            let browser;
+            
+            if (browserType === 'user-browser') {
+                // 使用用户当前浏览器
+                console.log('🌐 使用用户当前浏览器进行授权...');
+                browser = await this.launchUserBrowser();
+            } else {
+                // 使用默认的Chromium浏览器
+                browser = await chromium.launch({
+                    headless: this.config.headless,
+                    args: [
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-accelerated-2d-canvas',
+                        '--no-first-run',
+                        '--no-zygote',
+                        '--disable-gpu'
+                    ]
+                });
+            }
+            
+            this.browser = browser;
 
             // 创建浏览器上下文并设置User-Agent
             const context = await this.browser.newContext({
@@ -142,8 +211,29 @@ class XiaohongshuScraper {
                 }
             }
 
-            // 登录完成后，执行搜索操作
-            console.log('🔍 登录完成，开始搜索操作...');
+            // 验证登录状态
+            const isLoggedIn = await this.checkLoginStatus();
+            if (!isLoggedIn) {
+                console.log('❌ 登录验证失败，自动跳转到登录页面...');
+                await this.page.goto('https://www.xiaohongshu.com/explore');
+                console.log('🔐 请在浏览器中完成登录...');
+                await this.waitForLogin();
+                
+                // 重新验证登录状态
+                const isLoggedInAfterLogin = await this.checkLoginStatus();
+                if (!isLoggedInAfterLogin) {
+                    console.log('❌ 登录仍然失败');
+                    return {
+                        success: false,
+                        error: '登录失败，请检查登录状态',
+                        restaurantName,
+                        location
+                    };
+                }
+                console.log('✅ 重新登录成功！');
+            }
+            
+            console.log('✅ 登录验证成功，开始搜索操作...');
             await this.performSearch(searchKeyword);
 
             // 获取图片链接
@@ -377,40 +467,119 @@ class XiaohongshuScraper {
         try {
             console.log('📱 使用扫码登录...');
             
-            // 访问登录页面，使用更宽松的加载策略
+            // 直接访问小红书首页
+            console.log('🌐 正在打开小红书首页...');
             await this.page.goto('https://www.xiaohongshu.com/explore', { 
                 waitUntil: 'domcontentloaded',
-                timeout: 60000 // 增加到60秒超时
+                timeout: 60000
             });
-            await this.page.waitForTimeout(3000);
+            await this.page.waitForTimeout(5000);
             
-            // 查找并点击登录按钮
-            try {
-                const loginButton = await this.page.waitForSelector('text=登录', { timeout: 5000 });
-                await loginButton.click();
-                console.log('✅ 点击登录按钮');
-            } catch (error) {
-                console.log('⚠️ 未找到登录按钮，可能已经登录');
-                return await this.checkLoginStatus();
+            console.log('🔍 检查当前页面状态...');
+            const currentUrl = this.page.url();
+            console.log(`📍 当前页面URL: ${currentUrl}`);
+            
+            // 检查是否已经登录
+            const isAlreadyLoggedIn = await this.checkLoginStatus();
+            if (isAlreadyLoggedIn) {
+                console.log('✅ 检测到已经登录，无需重新登录');
+                return true;
             }
             
-            await this.page.waitForTimeout(3000);
+            // 尝试多种方式触发登录弹窗
+            console.log('🔐 尝试触发登录弹窗...');
             
-            // 检查是否已经显示二维码（小红书默认显示扫码登录）
-            console.log('🔍 检查登录界面...');
-            
-            // 等待二维码出现
+            // 方法1: 查找并点击登录按钮
             try {
-                await this.page.waitForSelector('img[alt*="二维码"], .qr-code, canvas', { timeout: 10000 });
-                console.log('✅ 二维码已显示');
+                const loginSelectors = [
+                    'text=登录',
+                    'button:has-text("登录")',
+                    '.login-btn',
+                    '.login-button',
+                    '[data-testid*="login"]',
+                    'a:has-text("登录")'
+                ];
+                
+                let loginButton = null;
+                for (const selector of loginSelectors) {
+                    try {
+                        loginButton = await this.page.waitForSelector(selector, { timeout: 3000 });
+                        if (loginButton) {
+                            console.log(`✅ 找到登录按钮: ${selector}`);
+                            break;
+                        }
+                    } catch (error) {
+                        continue;
+                    }
+                }
+                
+                if (loginButton) {
+                    await loginButton.click();
+                    console.log('✅ 已点击登录按钮');
+                    await this.page.waitForTimeout(3000);
+                } else {
+                    console.log('⚠️ 未找到登录按钮，尝试其他方法...');
+                }
             } catch (error) {
-                console.log('⚠️ 未找到二维码，可能页面结构有变化');
+                console.log('⚠️ 点击登录按钮失败:', error.message);
+            }
+            
+            // 方法2: 尝试访问需要登录的页面
+            try {
+                console.log('🔄 尝试访问需要登录的页面...');
+                await this.page.goto('https://www.xiaohongshu.com/user/profile', { 
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30000
+                });
+                await this.page.waitForTimeout(3000);
+            } catch (error) {
+                console.log('⚠️ 访问用户页面失败:', error.message);
+            }
+            
+            // 方法3: 尝试搜索功能触发登录
+            try {
+                console.log('🔍 尝试使用搜索功能触发登录...');
+                await this.page.goto('https://www.xiaohongshu.com/search_result?keyword=test', { 
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30000
+                });
+                await this.page.waitForTimeout(3000);
+            } catch (error) {
+                console.log('⚠️ 访问搜索页面失败:', error.message);
+            }
+            
+            // 检查是否出现了登录弹窗或二维码
+            console.log('🔍 检查是否出现登录界面...');
+            
+            // 等待二维码或登录弹窗出现
+            try {
+                const loginElements = await this.page.waitForSelector(
+                    'img[alt*="二维码"], .qr-code, canvas, .login-modal, .login-popup, [class*="login"]', 
+                    { timeout: 10000 }
+                );
+                console.log('✅ 检测到登录界面已出现');
+            } catch (error) {
+                console.log('⚠️ 未检测到登录界面，可能页面结构有变化');
+                
+                // 输出当前页面信息用于调试
+                const pageInfo = await this.page.evaluate(() => {
+                    return {
+                        url: window.location.href,
+                        title: document.title,
+                        bodyText: document.body ? document.body.innerText.substring(0, 500) : '',
+                        hasLoginElements: document.querySelectorAll('*').length > 0 ? 
+                            Array.from(document.querySelectorAll('*')).filter(el => 
+                                el.textContent && el.textContent.includes('登录')
+                            ).length : 0
+                    };
+                });
+                console.log('📄 当前页面信息:', pageInfo);
             }
             
             console.log('📱 请使用小红书APP或微信扫描页面上的二维码完成登录...');
             console.log('⏳ 正在等待扫码完成，请稍候...');
             
-            // 自动检测扫码完成，而不是等待用户按任意键
+            // 自动检测扫码完成
             const loginSuccess = await this.waitForQrCodeLogin();
             
             if (loginSuccess) {
@@ -1001,6 +1170,25 @@ class XiaohongshuScraper {
                 }
             }
             
+            // 自动Cookie刷新机制：当检测到用户相关元素缺失时
+            if (!isLoggedIn && !loginInfo.hasUserElements && !loginInfo.hasUserMenu && cookieValid) {
+                console.log('🔄 检测到用户相关元素缺失，尝试自动刷新Cookie...');
+                try {
+                    const refreshResult = await this.autoRefreshCookies();
+                    if (refreshResult.success) {
+                        console.log('✅ 自动Cookie刷新成功，重新检查登录状态...');
+                        // 重新检查登录状态
+                        const recheckResult = await this.checkLoginStatus();
+                        if (recheckResult) {
+                            console.log('✅ 刷新Cookie后登录状态正常');
+                            return true;
+                        }
+                    }
+                } catch (error) {
+                    console.log('⚠️ 自动Cookie刷新失败:', error.message);
+                }
+            }
+            
             console.log(`✅ 最终登录状态: ${isLoggedIn ? '已登录' : '未登录'} (评分: ${loginInfo.loginScore})`);
             
             return isLoggedIn;
@@ -1032,25 +1220,47 @@ class XiaohongshuScraper {
                 return false;
             }
             
-            // 第一步：检查关键登录Cookie的存在性和过期时间
-            const criticalCookies = ['web_session', 'a1', 'webId'];
+            // 第一步：检查Cookie的基本有效性（更宽松的验证）
             const now = Date.now() / 1000;
+            let validCookieCount = 0;
             
-            for (const cookieName of criticalCookies) {
-                const cookie = cookies.find(c => c.name === cookieName);
-                if (!cookie) {
-                    console.log(`❌ 缺少关键Cookie: ${cookieName}`);
-                    return false;
-                }
-                
-                // 检查Cookie是否过期
-                if (cookie.expires > 0 && cookie.expires < now) {
-                    console.log(`❌ Cookie已过期: ${cookieName}`);
-                    return false;
+            // 检查是否有任何有效的Cookie
+            for (const cookie of cookies) {
+                if (cookie.name && cookie.value) {
+                    // 检查Cookie是否过期
+                    if (cookie.expires > 0 && cookie.expires < now) {
+                        console.log(`⚠️ Cookie已过期: ${cookie.name}`);
+                        continue;
+                    }
+                    validCookieCount++;
                 }
             }
             
-            console.log('✅ 关键Cookie存在且未过期');
+            if (validCookieCount === 0) {
+                console.log('❌ 没有找到有效的Cookie');
+                return false;
+            }
+            
+            console.log(`✅ 找到 ${validCookieCount} 个有效Cookie`);
+            
+            // 检查是否有任何登录相关的Cookie（更宽松的检查）
+            const loginRelatedCookies = cookies.filter(cookie => 
+                cookie.name && (
+                    cookie.name.includes('session') ||
+                    cookie.name.includes('user') ||
+                    cookie.name.includes('login') ||
+                    cookie.name.includes('token') ||
+                    cookie.name.includes('auth') ||
+                    cookie.name === 'a1' ||
+                    cookie.name === 'webId'
+                )
+            );
+            
+            if (loginRelatedCookies.length === 0) {
+                console.log('⚠️ 未找到登录相关Cookie，但继续尝试...');
+            } else {
+                console.log(`✅ 找到 ${loginRelatedCookies.length} 个登录相关Cookie`);
+            }
             
             // 第二步：实际验证Cookie是否仍然有效（仅在首次检查时进行）
             if (this.page && !this._cookieValidationPerformed) {
@@ -1641,6 +1851,71 @@ class XiaohongshuScraper {
             errors: this.errors,
             config: this.config
         };
+    }
+
+    /**
+     * 自动刷新Cookie
+     * 当检测到用户相关元素缺失时，自动调用refresh-cookies.js来刷新Cookie
+     * @returns {Promise<Object>} 刷新结果
+     */
+    async autoRefreshCookies() {
+        try {
+            console.log('🔄 开始自动刷新Cookie...');
+            
+            // 检查是否存在refresh-cookies.js文件
+            const fs = require('fs-extra');
+            const path = require('path');
+            const refreshScriptPath = path.join(__dirname, '..', 'refresh-cookies.js');
+            
+            if (!await fs.pathExists(refreshScriptPath)) {
+                console.log('⚠️ refresh-cookies.js 文件不存在，跳过自动刷新');
+                return { success: false, error: 'refresh-cookies.js 文件不存在' };
+            }
+            
+            // 使用当前浏览器实例进行Cookie刷新
+            console.log('🌐 使用当前浏览器实例刷新Cookie...');
+            
+            // 访问小红书主页
+            await this.page.goto('https://www.xiaohongshu.com/explore', {
+                waitUntil: 'domcontentloaded',
+                timeout: 30000
+            });
+            
+            // 等待页面加载
+            await this.page.waitForTimeout(3000);
+            
+            // 检查是否需要重新登录
+            const needsLogin = await this.page.evaluate(() => {
+                const loginElements = document.querySelectorAll('.login-btn, .login-button, [data-testid*="login"]');
+                const hasLoginPrompt = document.body.innerText.includes('登录') || 
+                                     document.body.innerText.includes('扫码登录') ||
+                                     document.body.innerText.includes('手机号登录');
+                return loginElements.length > 0 || hasLoginPrompt;
+            });
+            
+            if (needsLogin) {
+                console.log('🔐 检测到需要重新登录，请在浏览器中完成登录...');
+                console.log('⏳ 等待用户完成登录...');
+                
+                // 等待登录完成
+                const loginSuccess = await this.waitForLogin();
+                if (loginSuccess) {
+                    console.log('✅ 用户登录成功，保存新Cookie...');
+                    await this.saveCookies();
+                    return { success: true, message: '用户登录成功，Cookie已更新' };
+                } else {
+                    console.log('❌ 用户登录失败或超时');
+                    return { success: false, error: '用户登录失败或超时' };
+                }
+            } else {
+                console.log('✅ 当前登录状态正常，无需刷新Cookie');
+                return { success: true, message: '当前登录状态正常' };
+            }
+            
+        } catch (error) {
+            console.error('❌ 自动刷新Cookie时出错:', error.message);
+            return { success: false, error: error.message };
+        }
     }
 }
 

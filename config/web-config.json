@@ -1,0 +1,25 @@
+{
+  "restaurants": [
+    {
+      "name": "广仔阿福鸡煲(合生汇店)",
+      "location": "北京九龙山",
+      "maxImages": 6
+    },
+    {
+      "name": "便宜坊",
+      "location": "北京朝阳公园店",
+      "maxImages": 6
+    },
+    {
+      "name": "店)  ",
+      "location": "朝阳公园/团结湖",
+      "maxImages": 6
+    }
+  ],
+  "outputPath": "./downloads",
+  "maxImages": 6,
+  "delay": 2000,
+  "tryRemoveWatermark": true,
+  "enableImageProcessing": true,
+  "headless": true
+}

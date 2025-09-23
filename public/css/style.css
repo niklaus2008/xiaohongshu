@@ -1,0 +1,637 @@
+/**
+ * 小红书餐馆图片下载工具 - 自定义样式
+ * 
+ * @author AI Assistant
+ * @version 1.0.0
+ */
+
+/* 全局样式 */
+body {
+    background-color: #f8f9fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* 头部样式 */
+header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+/* 卡片样式 */
+.card {
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 2px 15px rgba(0,0,0,0.08);
+    transition: all 0.3s ease;
+}
+
+.card:hover {
+    box-shadow: 0 4px 25px rgba(0,0,0,0.12);
+    transform: translateY(-2px);
+}
+
+.card-header {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-bottom: 1px solid #dee2e6;
+    border-radius: 12px 12px 0 0 !important;
+    font-weight: 600;
+}
+
+/* 进度条样式 */
+.progress {
+    border-radius: 10px;
+    overflow: hidden;
+    background-color: #e9ecef;
+}
+
+.progress-bar {
+    background: linear-gradient(90deg, #28a745 0%, #20c997 100%);
+    border-radius: 10px;
+    transition: width 0.6s ease;
+}
+
+.progress-bar-striped {
+    background-image: linear-gradient(
+        45deg,
+        rgba(255, 255, 255, 0.15) 25%,
+        transparent 25%,
+        transparent 50%,
+        rgba(255, 255, 255, 0.15) 50%,
+        rgba(255, 255, 255, 0.15) 75%,
+        transparent 75%,
+        transparent
+    );
+    background-size: 1rem 1rem;
+}
+
+/* 按钮样式 */
+.btn {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    border: none;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.btn-success {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+}
+
+.btn-warning {
+    background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+    color: #212529;
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, #dc3545 0%, #e83e8c 100%);
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #007bff 0%, #6610f2 100%);
+}
+
+/* 表单样式 */
+.form-control {
+    border-radius: 8px;
+    border: 2px solid #e9ecef;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.form-check-input:checked {
+    background-color: #007bff;
+    border-color: #007bff;
+}
+
+/* 餐馆列表样式 */
+.restaurant-item {
+    background: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 10px;
+    transition: all 0.3s ease;
+}
+
+.restaurant-item:hover {
+    border-color: #007bff;
+    box-shadow: 0 2px 8px rgba(0,123,255,0.1);
+}
+
+.restaurant-item .restaurant-info {
+    flex: 1;
+}
+
+.restaurant-item .restaurant-name {
+    font-weight: 600;
+    color: #212529;
+    margin-bottom: 5px;
+}
+
+.restaurant-item .restaurant-location {
+    color: #6c757d;
+    font-size: 0.9em;
+}
+
+.restaurant-item .restaurant-max-images {
+    color: #6c757d;
+    font-size: 0.8em;
+}
+
+.restaurant-item .restaurant-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.restaurant-item .btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+}
+
+/* 日志容器样式 */
+.logs-container {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: 8px;
+    padding: 15px;
+    height: 400px;
+    overflow-y: auto;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+    line-height: 1.4;
+}
+
+.logs-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.logs-container::-webkit-scrollbar-track {
+    background: #2d2d2d;
+    border-radius: 4px;
+}
+
+.logs-container::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 4px;
+}
+
+.logs-container::-webkit-scrollbar-thumb:hover {
+    background: #777;
+}
+
+/* 日志条目样式 */
+.log-entry {
+    margin-bottom: 8px;
+    padding: 5px 0;
+    border-bottom: 1px solid #333;
+}
+
+.log-entry:last-child {
+    border-bottom: none;
+}
+
+.log-entry .log-timestamp {
+    color: #888;
+    font-size: 0.8em;
+    margin-right: 10px;
+}
+
+.log-entry .log-level {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.75em;
+    font-weight: 600;
+    margin-right: 10px;
+    min-width: 50px;
+    text-align: center;
+}
+
+.log-entry .log-level.info {
+    background-color: #17a2b8;
+    color: white;
+}
+
+.log-entry .log-level.success {
+    background-color: #28a745;
+    color: white;
+}
+
+.log-entry .log-level.warning {
+    background-color: #ffc107;
+    color: #212529;
+}
+
+.log-entry .log-level.error {
+    background-color: #dc3545;
+    color: white;
+}
+
+.log-entry .log-message {
+    color: #d4d4d4;
+}
+
+/* 统计卡片样式 */
+.stats-card {
+    background: linear-gradient(135deg, #fff 0%, #f8f9fa 100%);
+    border: 1px solid #e9ecef;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.stats-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+}
+
+.stats-card h4 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+
+.stats-card small {
+    color: #6c757d;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* 状态徽章样式 */
+.badge {
+    font-size: 0.8em;
+    padding: 0.5em 0.75em;
+    border-radius: 6px;
+}
+
+/* 模态框样式 */
+.modal-content {
+    border-radius: 12px;
+    border: none;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+
+.modal-header {
+    border-radius: 12px 12px 0 0;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.modal-footer {
+    border-radius: 0 0 12px 12px;
+    border-top: 1px solid #e9ecef;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .container-fluid {
+        padding: 10px;
+    }
+    
+    .card {
+        margin-bottom: 15px;
+    }
+    
+    .restaurant-item {
+        padding: 10px;
+    }
+    
+    .restaurant-item .restaurant-actions {
+        flex-direction: column;
+        gap: 3px;
+    }
+    
+    .logs-container {
+        height: 300px;
+    }
+    
+    .stats-card h4 {
+        font-size: 1.5rem;
+    }
+}
+
+@media (max-width: 576px) {
+    header h1 {
+        font-size: 1.5rem;
+    }
+    
+    .btn-lg {
+        padding: 0.75rem 1rem;
+        font-size: 1rem;
+    }
+    
+    .logs-container {
+        height: 250px;
+        font-size: 0.8em;
+    }
+}
+
+/* 动画效果 */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fade-in {
+    animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+.pulse {
+    animation: pulse 2s infinite;
+}
+
+/* 加载动画 */
+.loading {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* 工具提示样式 */
+.tooltip {
+    font-size: 0.875rem;
+}
+
+.tooltip-inner {
+    background-color: #212529;
+    border-radius: 6px;
+    padding: 8px 12px;
+}
+
+/* 空状态样式 */
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #6c757d;
+}
+
+.empty-state i {
+    font-size: 3rem;
+    margin-bottom: 15px;
+    opacity: 0.5;
+}
+
+.empty-state h5 {
+    margin-bottom: 10px;
+    color: #495057;
+}
+
+.empty-state p {
+    margin-bottom: 0;
+    font-size: 0.9em;
+}
+
+/* 成功状态样式 */
+.success-state {
+    background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+    border: 1px solid #c3e6cb;
+    color: #155724;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+/* 错误状态样式 */
+.error-state {
+    background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+/* 警告状态样式 */
+.warning-state {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    border: 1px solid #ffeaa7;
+    color: #856404;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+/* 餐馆进度样式 */
+.restaurant-progress-item {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 12px;
+    transition: all 0.3s ease;
+}
+
+.restaurant-progress-item:hover {
+    border-color: #007bff;
+    box-shadow: 0 2px 8px rgba(0,123,255,0.1);
+}
+
+.restaurant-progress-item .restaurant-name {
+    font-weight: 600;
+    color: #212529;
+    font-size: 0.9em;
+}
+
+.restaurant-progress-item .progress {
+    background-color: #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.restaurant-progress-item .progress-bar {
+    transition: width 0.6s ease;
+}
+
+.restaurant-progress-item .progress-bar.bg-primary {
+    background: linear-gradient(90deg, #007bff 0%, #0056b3 100%);
+}
+
+.restaurant-progress-item .progress-bar.bg-success {
+    background: linear-gradient(90deg, #28a745 0%, #1e7e34 100%);
+}
+
+.restaurant-progress-item .progress-bar.bg-danger {
+    background: linear-gradient(90deg, #dc3545 0%, #c82333 100%);
+}
+
+.restaurant-progress-item .progress-bar.bg-secondary {
+    background: linear-gradient(90deg, #6c757d 0%, #545b62 100%);
+}
+
+/* 登录模态框样式 */
+.login-container {
+    position: relative;
+}
+
+.login-iframe-container {
+    position: relative;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.login-iframe-container iframe {
+    display: block;
+    border: none;
+    background: #fff;
+}
+
+.login-instructions {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-top: 1px solid #dee2e6;
+}
+
+.login-instructions h6 {
+    color: #495057;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.login-instructions ul {
+    margin-bottom: 0;
+    padding-left: 20px;
+}
+
+.login-instructions li {
+    color: #6c757d;
+    margin-bottom: 4px;
+}
+
+/* 登录状态样式 */
+.login-status-container {
+    text-align: center;
+    padding: 20px;
+}
+
+.login-status-container .fa-2x {
+    margin-bottom: 15px;
+}
+
+.login-status-container .text-success {
+    color: #28a745 !important;
+}
+
+.login-status-container .text-warning {
+    color: #ffc107 !important;
+}
+
+.login-status-container .text-danger {
+    color: #dc3545 !important;
+}
+
+/* 登录按钮样式 */
+#loginBtn {
+    background: linear-gradient(135deg, #ff2442 0%, #e91e63 100%);
+    border: none;
+    color: white;
+    font-weight: 600;
+    padding: 12px 24px;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+#loginBtn:hover {
+    background: linear-gradient(135deg, #e91e63 0%, #c2185b 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(255, 36, 66, 0.3);
+}
+
+#checkLoginBtn {
+    background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+    border: none;
+    color: white;
+    font-weight: 500;
+    padding: 8px 16px;
+    border-radius: 6px;
+    transition: all 0.3s ease;
+}
+
+#checkLoginBtn:hover {
+    background: linear-gradient(135deg, #495057 0%, #343a40 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(108, 117, 125, 0.3);
+}
+
+/* 模态框动画 */
+.modal.fade .modal-dialog {
+    transition: transform 0.3s ease-out;
+    transform: translate(0, -50px);
+}
+
+.modal.show .modal-dialog {
+    transform: none;
+}
+
+/* 响应式登录模态框 */
+@media (max-width: 768px) {
+    .modal-lg {
+        max-width: 95%;
+        margin: 1rem auto;
+    }
+    
+    .login-iframe-container iframe {
+        height: 500px;
+    }
+    
+    .login-instructions {
+        padding: 15px !important;
+    }
+    
+    .login-instructions .row {
+        flex-direction: column;
+    }
+    
+    .login-instructions .col-md-4 {
+        text-align: left !important;
+        margin-top: 10px;
+    }
+}
+
+@media (max-width: 576px) {
+    .login-iframe-container iframe {
+        height: 400px;
+    }
+    
+    .login-instructions h6 {
+        font-size: 0.9rem;
+    }
+    
+    .login-instructions ul {
+        font-size: 0.8rem;
+    }
+}

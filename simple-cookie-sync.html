@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简单Cookie同步</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-sync me-2"></i>
+                            简单Cookie同步
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-success">
+                            <h6><i class="fas fa-check-circle me-2"></i>使用说明</h6>
+                            <p class="mb-0">这个页面使用更简单的Cookie同步方法，避免复杂的验证过程。</p>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card border-primary">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title">步骤1：打开小红书</h6>
+                                        <p class="card-text">在新标签页中打开小红书并登录</p>
+                                        <a href="https://www.xiaohongshu.com/explore" target="_blank" class="btn btn-primary">
+                                            <i class="fas fa-external-link-alt me-2"></i>
+                                            打开小红书
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card border-success">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title">步骤2：同步Cookie</h6>
+                                        <p class="card-text">在小红书页面运行同步脚本</p>
+                                        <button class="btn btn-success" onclick="showSyncScript()">
+                                            <i class="fas fa-code me-2"></i>
+                                            显示同步脚本
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <h6>详细步骤：</h6>
+                            <ol>
+                                <li>点击"打开小红书"按钮，在新标签页中打开小红书</li>
+                                <li>确保您已经登录小红书（如果没有，请先登录）</li>
+                                <li>在小红书页面按 <kbd>F12</kbd> 打开开发者工具</li>
+                                <li>点击"Console"标签页</li>
+                                <li>点击"显示同步脚本"按钮，复制脚本代码</li>
+                                <li>在控制台中粘贴并运行脚本</li>
+                                <li>脚本会自动同步Cookie到下载工具</li>
+                                <li>返回此页面，点击"检查登录状态"按钮</li>
+                            </ol>
+                        </div>
+                        
+                        <div class="mt-4 text-center">
+                            <button class="btn btn-success btn-lg" onclick="checkLoginStatus()">
+                                <i class="fas fa-check me-2"></i>
+                                检查登录状态
+                            </button>
+                        </div>
+                        
+                        <div id="scriptCode" class="mt-4" style="display: none;">
+                            <h6>Cookie同步脚本：</h6>
+                            <div class="bg-dark text-light p-3 rounded">
+                                <pre id="scriptContent" class="mb-0"></pre>
+                            </div>
+                            <button class="btn btn-sm btn-outline-primary mt-2" onclick="copyScript()">
+                                <i class="fas fa-copy me-1"></i>
+                                复制脚本
+                            </button>
+                        </div>
+                        
+                        <div id="loginResult" class="mt-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const syncScript = `// 简单Cookie同步脚本 - 在小红书页面中运行
+console.log('🔍 开始同步小红书Cookie...');
+
+// 检查是否在小红书页面
+if (!window.location.hostname.includes('xiaohongshu.com')) {
+    console.error('❌ 请在小红书页面中运行此脚本');
+    alert('❌ 请在小红书页面中运行此脚本');
+} else {
+    // 获取所有Cookie
+    const cookies = document.cookie.split(';').map(cookie => {
+        const [name, value] = cookie.trim().split('=');
+        return {
+            name: name,
+            value: value,
+            domain: window.location.hostname,
+            path: '/',
+            expires: Date.now() / 1000 + 30 * 24 * 60 * 60
+        };
+    }).filter(cookie => cookie.name && cookie.value);
+
+    if (cookies.length === 0) {
+        console.log('❌ 未找到Cookie，请确保已登录小红书');
+        alert('❌ 未找到Cookie，请确保已登录小红书');
+    } else {
+        console.log(\`📋 找到 \${cookies.length} 个Cookie，正在同步...\`);
+        
+        // 使用简单的check端点同步Cookie
+        fetch('http://localhost:3000/api/login/check', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ cookies })
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.success) {
+                console.log('✅ Cookie同步成功！登录状态已保存到下载工具');
+                alert(\`✅ Cookie同步成功！\\n\\n已保存 \${result.data.count} 个Cookie到下载工具\\n\\n现在可以返回下载工具开始下载了。\`);
+            } else {
+                console.error('❌ Cookie同步失败:', result.error);
+                alert('❌ Cookie同步失败: ' + result.error);
+            }
+        })
+        .catch(error => {
+            console.error('❌ 同步过程中出错:', error);
+            alert('❌ 同步过程中出错: ' + error.message + '\\n\\n请确保下载工具正在运行。');
+        });
+    }
+}`;
+
+        function showSyncScript() {
+            const scriptDiv = document.getElementById('scriptCode');
+            const scriptContent = document.getElementById('scriptContent');
+            
+            scriptContent.textContent = syncScript;
+            scriptDiv.style.display = 'block';
+        }
+        
+        function copyScript() {
+            const scriptContent = document.getElementById('scriptContent');
+            navigator.clipboard.writeText(scriptContent.textContent).then(() => {
+                alert('脚本已复制到剪贴板！');
+            }).catch(err => {
+                console.error('复制失败:', err);
+                // 备用方法
+                const textArea = document.createElement('textarea');
+                textArea.value = scriptContent.textContent;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                alert('脚本已复制到剪贴板！');
+            });
+        }
+        
+        async function checkLoginStatus() {
+            const resultDiv = document.getElementById('loginResult');
+            resultDiv.innerHTML = `
+                <div class="alert alert-info">
+                    <i class="fas fa-spinner fa-spin me-2"></i>
+                    正在检查登录状态...
+                </div>
+            `;
+            
+            try {
+                const response = await fetch('/api/login/status');
+                const result = await response.json();
+                
+                if (result.success && result.data.isLoggedIn) {
+                    resultDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle me-2"></i>
+                            <strong>登录状态同步成功！</strong><br>
+                            Cookie数量: ${result.data.cookieInfo.count}<br>
+                            <small>现在可以返回主页面开始下载了</small>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <strong>未检测到登录状态</strong><br>
+                            <small>请按照上述步骤同步Cookie</small>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-times-circle me-2"></i>
+                        <strong>检查登录状态失败</strong><br>
+                        <small>错误: ${error.message}</small>
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

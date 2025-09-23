@@ -1,65 +1,96 @@
 /**
- * 测试修复后的Cookie有效性验证
+ * 测试Cookie验证功能
  */
 
 const { XiaohongshuScraper } = require('./src/xiaohongshu-scraper');
+const fs = require('fs-extra');
 
 async function testCookieValidation() {
-    console.log('🧪 测试修复后的Cookie有效性验证...\n');
+    console.log('🍪 测试Cookie验证功能...\n');
     
     const scraper = new XiaohongshuScraper({
-        downloadPath: './test-cookie-validation-downloads',
-        maxImages: 1,
-        headless: false, // 显示浏览器窗口
-        delay: 1000,
+        downloadPath: '/Users/liuqiang/code/toolkit/xiaohongshu/test-cookie-downloads',
+        maxImages: 2,
+        headless: false,
         login: {
-            method: 'qr',
+            method: 'manual',
             autoLogin: true,
             saveCookies: true,
-            cookieFile: './cookies.json'
+            cookieFile: '/Users/liuqiang/code/toolkit/xiaohongshu/cookies.json'
         }
     });
 
     try {
-        // 初始化浏览器
         console.log('🔧 初始化浏览器...');
         await scraper.initBrowser();
         console.log('✅ 浏览器初始化完成\n');
 
-        // 测试Cookie有效性验证
-        console.log('🍪 测试Cookie有效性验证...');
-        const cookieValid = await scraper.checkCookieValidity();
-        
-        if (cookieValid) {
-            console.log('✅ Cookie验证通过：Cookie完全有效，可以直接使用\n');
-            
-            // 测试搜索功能验证登录状态
-            console.log('🔍 测试搜索功能验证登录状态...');
-            const result = await scraper.searchAndDownload('海底捞', '北京朝阳区');
-            
-            if (result) {
-                console.log('✅ 搜索和下载成功：确认登录状态正常');
+        // 直接测试Cookie加载
+        console.log('🍪 测试Cookie加载...');
+        const cookieLoaded = await scraper.loadCookies();
+        console.log(`Cookie加载结果: ${cookieLoaded}`);
+
+        if (cookieLoaded) {
+            console.log('🌐 访问小红书首页验证Cookie...');
+            await scraper.page.goto('https://www.xiaohongshu.com/explore', { 
+                waitUntil: 'domcontentloaded',
+                timeout: 30000
+            });
+            await scraper.page.waitForTimeout(5000);
+
+            // 检查页面内容
+            const pageInfo = await scraper.page.evaluate(() => {
+                return {
+                    url: window.location.href,
+                    title: document.title,
+                    hasLoginPrompt: document.body ? document.body.innerText.includes('登录后查看搜索结果') : false,
+                    hasContent: document.querySelectorAll('.note-item, .feed-item, .content-item').length,
+                    bodyText: document.body ? document.body.innerText.substring(0, 500) : ''
+                };
+            });
+
+            console.log('📄 页面信息:', pageInfo);
+
+            if (pageInfo.hasLoginPrompt) {
+                console.log('❌ 页面显示登录提示，Cookie可能已失效');
             } else {
-                console.log('❌ 搜索和下载失败：登录状态可能有问题');
+                console.log('✅ 页面未显示登录提示，Cookie可能有效');
             }
-        } else {
-            console.log('❌ Cookie验证失败：Cookie已失效，需要重新登录\n');
-            
-            // 测试自动登录
-            console.log('🔐 测试自动登录...');
-            const loginResult = await scraper.autoLogin();
-            
-            if (loginResult) {
-                console.log('✅ 自动登录成功');
+
+            // 尝试搜索
+            console.log('\n🔍 尝试搜索测试...');
+            const searchUrl = 'https://www.xiaohongshu.com/search_result?keyword=海底捞&type=51';
+            await scraper.page.goto(searchUrl, { 
+                waitUntil: 'domcontentloaded',
+                timeout: 30000
+            });
+            await scraper.page.waitForTimeout(5000);
+
+            const searchInfo = await scraper.page.evaluate(() => {
+                return {
+                    url: window.location.href,
+                    title: document.title,
+                    hasLoginPrompt: document.body ? document.body.innerText.includes('登录后查看搜索结果') : false,
+                    hasContent: document.querySelectorAll('.note-item, .feed-item, .content-item, .note-card, .search-item, .result-item, article, .card').length,
+                    bodyText: document.body ? document.body.innerText.substring(0, 500) : ''
+                };
+            });
+
+            console.log('📄 搜索页面信息:', searchInfo);
+
+            if (searchInfo.hasLoginPrompt) {
+                console.log('❌ 搜索页面显示登录提示，需要重新登录');
+            } else if (searchInfo.hasContent > 0) {
+                console.log('✅ 搜索页面有内容，Cookie有效');
             } else {
-                console.log('❌ 自动登录失败');
+                console.log('⚠️ 搜索页面无内容，可能Cookie部分失效');
             }
         }
-        
+
     } catch (error) {
         console.error('❌ 测试过程中发生错误:', error.message);
+        console.error('详细错误:', error);
     } finally {
-        // 关闭浏览器
         console.log('\n🔚 关闭浏览器...');
         await scraper.close();
         console.log('✅ 测试完成');
