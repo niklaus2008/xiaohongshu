@@ -73,6 +73,27 @@ class XiaohongshuDownloaderApp {
             this.addLog('服务状态：出现错误', 'error');
         });
         
+        // 监听任务完成事件
+        this.socket.on('task_completed', (data) => {
+            console.log('收到任务完成事件:', data);
+            this.addLog('🎉 任务已完成，正在停止心跳检测...', 'success');
+            this.handleTaskCompletion(data);
+        });
+        
+        // 监听最终任务完成事件
+        this.socket.on('task_final_completed', (data) => {
+            console.log('收到最终任务完成事件:', data);
+            this.addLog('✅ 所有任务已完成，前端日志将停止', 'success');
+            this.handleFinalTaskCompletion(data);
+        });
+        
+        // 监听心跳停止事件
+        this.socket.on('heartbeat_stopped', (data) => {
+            console.log('收到心跳停止事件:', data);
+            this.addLog('💓 心跳检测已停止', 'info');
+            this.stopServiceHeartbeat();
+        });
+        
         // 添加服务心跳检测
         this.startServiceHeartbeat();
     }
@@ -1254,7 +1275,7 @@ class XiaohongshuDownloaderApp {
      * 启动服务心跳检测
      */
     startServiceHeartbeat() {
-        // 每30秒发送一次心跳检测
+        // 每60秒发送一次心跳检测，减少频率
         this.heartbeatInterval = setInterval(() => {
             if (this.socket && this.socket.connected) {
                 this.socket.emit('ping');
@@ -1262,7 +1283,7 @@ class XiaohongshuDownloaderApp {
             } else {
                 this.addLog('服务状态：心跳检测失败', 'warning');
             }
-        }, 30000);
+        }, 60000);
 
         // 监听心跳响应
         this.socket.on('pong', () => {
@@ -1277,7 +1298,75 @@ class XiaohongshuDownloaderApp {
         if (this.heartbeatInterval) {
             clearInterval(this.heartbeatInterval);
             this.heartbeatInterval = null;
+            this.addLog('💓 前端心跳检测已停止', 'info');
         }
+    }
+
+    /**
+     * 处理任务完成事件
+     * @param {Object} data - 任务完成数据
+     */
+    handleTaskCompletion(data) {
+        // 更新状态为已完成
+        this.currentStatus.isRunning = false;
+        this.currentStatus.isPaused = false;
+        
+        // 更新进度为100%
+        this.currentStatus.progress = 100;
+        
+        // 更新餐馆进度状态
+        if (data.restaurantProgress) {
+            this.currentStatus.restaurantProgress = data.restaurantProgress;
+        }
+        
+        // 更新统计信息
+        if (data.stats) {
+            this.currentStatus.totalRestaurants = data.stats.totalRestaurants || 0;
+            this.currentStatus.completedRestaurants = data.stats.completedRestaurants || 0;
+            this.currentStatus.failedRestaurants = data.stats.failedRestaurants || 0;
+            this.currentStatus.totalImages = data.stats.totalImages || 0;
+            this.currentStatus.downloadedImages = data.stats.downloadedImages || 0;
+            this.currentStatus.failedImages = data.stats.failedImages || 0;
+        }
+        
+        // 更新UI状态
+        this.updateStatusUI();
+        
+        // 停止前端心跳检测
+        this.stopServiceHeartbeat();
+        
+        this.addLog('📊 任务状态已更新为完成', 'info');
+    }
+
+    /**
+     * 处理最终任务完成事件
+     * @param {Object} data - 最终任务完成数据
+     */
+    handleFinalTaskCompletion(data) {
+        // 调用任务完成处理
+        this.handleTaskCompletion(data);
+        
+        // 添加最终完成日志
+        this.addLog('🎊 批量下载任务全部完成！', 'success');
+        
+        // 显示最终统计信息
+        if (data.stats) {
+            const duration = data.stats.endTime ? 
+                new Date(data.stats.endTime) - new Date(data.stats.startTime) : 0;
+            const durationMinutes = Math.round(duration / 60000);
+            
+            this.addLog('📈 最终统计信息:', 'info');
+            this.addLog(`   - 总餐馆数: ${data.stats.totalRestaurants}`, 'info');
+            this.addLog(`   - 成功: ${data.stats.completedRestaurants}`, 'info');
+            this.addLog(`   - 失败: ${data.stats.failedRestaurants}`, 'info');
+            this.addLog(`   - 总图片数: ${data.stats.totalImages}`, 'info');
+            this.addLog(`   - 下载成功: ${data.stats.downloadedImages}`, 'info');
+            this.addLog(`   - 下载失败: ${data.stats.failedImages}`, 'info');
+            this.addLog(`   - 耗时: ${durationMinutes} 分钟`, 'info');
+        }
+        
+        // 确保前端状态完全更新
+        this.updateStatusUI();
     }
 }
 

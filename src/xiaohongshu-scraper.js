@@ -46,8 +46,35 @@ class XiaohongshuScraper {
         this.downloadedCount = 0;
         this.errors = [];
         
+        // 日志回调函数（用于与外部系统通信）
+        this.logCallback = options.logCallback || null;
+        
+        // 日志管理器实例
+        this.logger = options.logger || null;
+        
         // 确保下载目录存在
         this.ensureDownloadDir();
+    }
+
+    /**
+     * 日志记录方法
+     * @private
+     * @param {string} message - 日志消息
+     * @param {string} level - 日志级别
+     */
+    log(message, level = 'info') {
+        // 总是输出到控制台
+        console.log(message);
+        
+        // 如果有日志管理器，使用它发送日志
+        if (this.logger) {
+            this.logger.sendCustomLog(message, level);
+        }
+        
+        // 如果有日志回调函数，也调用它（保持向后兼容）
+        if (this.logCallback && typeof this.logCallback === 'function') {
+            this.logCallback(message, level);
+        }
     }
 
     /**
@@ -1786,14 +1813,19 @@ class XiaohongshuScraper {
             
             try {
                 console.log(`⬇️ 正在下载第 ${i + 1}/${imageUrls.length} 张图片...`);
+                this.log(`⬇️ 正在下载第 ${i + 1}/${imageUrls.length} 张图片...`, 'info');
                 console.log(`🔗 图片URL: ${imageUrl.substring(0, 100)}...`);
+                this.log(`🔗 图片URL: ${imageUrl.substring(0, 100)}...`, 'info');
                 
                 // 获取图片内容
                 console.log(`🌐 正在获取图片内容...`);
+                this.log(`🌐 正在获取图片内容...`, 'info');
                 const response = await this.page.goto(imageUrl);
                 const buffer = await response.body();
                 
-                console.log(`📊 图片大小: ${(buffer.length / 1024).toFixed(2)} KB`);
+                const imageSizeKB = (buffer.length / 1024).toFixed(2);
+                console.log(`📊 图片大小: ${imageSizeKB} KB`);
+                this.log(`📊 图片大小: ${imageSizeKB} KB`, 'info');
                 
                 // 生成文件名
                 const fileName = this.generateFileName(imageUrl, i + 1);
@@ -1801,28 +1833,35 @@ class XiaohongshuScraper {
                 
                 // 保存图片
                 console.log(`💾 正在保存图片: ${fileName}`);
+                this.log(`💾 正在保存图片: ${fileName}`, 'info');
                 await fs.writeFile(filePath, buffer);
                 
                 // 如果启用了图片处理，尝试去除水印
                 if (this.config.enableImageProcessing) {
                     try {
                         console.log(`🔄 正在处理图片水印: ${fileName}`);
+                        this.log(`🔄 正在处理图片水印: ${fileName}`, 'info');
                         await this.processImageForWatermarkRemoval(filePath);
                         console.log(`✅ 图片水印处理完成: ${fileName}`);
+                        this.log(`✅ 图片水印处理完成: ${fileName}`, 'success');
                     } catch (error) {
                         console.log(`⚠️ 图片水印处理失败: ${fileName} - ${error.message}`);
+                        this.log(`⚠️ 图片水印处理失败: ${fileName} - ${error.message}`, 'warning');
                     }
                 }
                 
                 console.log(`✅ 图片已保存: ${fileName}`);
+                this.log(`✅ 图片已保存: ${fileName}`, 'success');
                 downloadedCount++;
                 
                 // 显示下载进度
                 const progress = Math.round(((i + 1) / imageUrls.length) * 100);
                 console.log(`📈 下载进度: ${progress}% (${i + 1}/${imageUrls.length})`);
+                this.log(`📈 下载进度: ${progress}% (${i + 1}/${imageUrls.length})`, 'info');
                 
                 // 添加延迟避免请求过快
                 console.log(`⏳ 等待 ${this.config.delay}ms 后继续...`);
+                this.log(`⏳ 等待 ${this.config.delay}ms 后继续...`, 'info');
                 await this.page.waitForTimeout(this.config.delay);
                 
             } catch (error) {
@@ -1871,10 +1910,12 @@ class XiaohongshuScraper {
     async processImageForWatermarkRemoval(imagePath) {
         try {
             console.log(`🔄 开始处理图片水印: ${imagePath}`);
+            this.log(`🔄 开始处理图片水印: ${imagePath}`, 'info');
             
             // 读取图片信息
             const imageInfo = await sharp(imagePath).metadata();
             console.log(`📊 图片信息: ${imageInfo.width}x${imageInfo.height}, 格式: ${imageInfo.format}`);
+            this.log(`📊 图片信息: ${imageInfo.width}x${imageInfo.height}, 格式: ${imageInfo.format}`, 'info');
             
             // 创建最终处理后的图片路径（只保存这一个版本）
             const processedPath = imagePath.replace(/\.(jpg|jpeg|png|webp)$/i, '_processed.$1');
@@ -1894,17 +1935,21 @@ class XiaohongshuScraper {
                 .toFile(processedPath);
             
             console.log(`✂️ 已裁剪右下角区域: ${processedPath}`);
+            this.log(`✂️ 已裁剪右下角区域: ${processedPath}`, 'info');
             
             // 删除原始图片，只保留处理后的版本
             await fs.remove(imagePath);
             console.log(`🗑️ 已删除原始图片: ${imagePath}`);
+            this.log(`🗑️ 已删除原始图片: ${imagePath}`, 'info');
             
             // 将处理后的图片重命名为最终文件名
             await fs.move(processedPath, imagePath);
             console.log(`✅ 已保存最终处理版本: ${imagePath}`);
+            this.log(`✅ 已保存最终处理版本: ${imagePath}`, 'success');
             
         } catch (error) {
             console.error(`❌ 图片水印处理失败: ${error.message}`);
+            this.log(`❌ 图片水印处理失败: ${error.message}`, 'error');
             throw error;
         }
     }

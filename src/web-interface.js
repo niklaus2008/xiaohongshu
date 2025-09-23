@@ -13,6 +13,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs-extra');
 const { BatchProcessor } = require('./batch-processor');
+const { getLogger } = require('./logger');
 
 class WebInterface {
     /**
@@ -35,6 +36,9 @@ class WebInterface {
         
         // 批量处理器实例
         this.batchProcessor = null;
+        
+        // 日志管理器实例
+        this.logger = null;
         
         // 设置中间件
         this.setupMiddleware();
@@ -81,6 +85,7 @@ class WebInterface {
         // API路由
         this.app.post('/api/start', this.handleStart.bind(this));
         this.app.post('/api/stop', this.handleStop.bind(this));
+        this.app.post('/api/stop-heartbeat', this.handleStopHeartbeat.bind(this));
         this.app.get('/api/status', this.handleStatus.bind(this));
         this.app.get('/api/logs', this.handleLogs.bind(this));
         this.app.post('/api/config/save', this.handleSaveConfig.bind(this));
@@ -104,8 +109,16 @@ class WebInterface {
      * @private
      */
     setupSocketEvents() {
+        // 获取全局日志管理器实例
+        this.logger = getLogger({
+            io: this.io,
+            enableTerminal: true,
+            enableFrontend: true
+        });
+        
         this.io.on('connection', (socket) => {
             console.log(`客户端已连接: ${socket.id}`);
+            this.logger.sendServiceLog(`客户端已连接: ${socket.id}`, 'info');
             
             // 发送当前状态
             this.sendCurrentStatus(socket);
@@ -113,11 +126,15 @@ class WebInterface {
             // 处理断开连接
             socket.on('disconnect', () => {
                 console.log(`客户端已断开: ${socket.id}`);
+                this.logger.sendServiceLog(`客户端已断开: ${socket.id}`, 'info');
             });
         });
         
-        // 启动心跳检测
-        this.startHeartbeat();
+        // 注意：task_completed 事件是从 batch-processor.js 发送的
+        // 这里不需要监听，因为 batch-processor.js 会直接调用相关方法
+        
+        // 不自动启动心跳检测，只在有任务时启动
+        // this.startHeartbeat();
     }
 
     /**
@@ -147,33 +164,40 @@ class WebInterface {
             // 检查是否已有任务在运行，如果有则清空
             if (this.batchProcessor && this.batchProcessor.isRunning()) {
                 console.log('🔄 检测到未完成的任务，正在清空...');
+                this.logger.sendTaskLog('检测到未完成的任务，正在清空...', 'warning');
                 try {
                     await this.batchProcessor.stop();
                     console.log('✅ 已清空之前的未完成任务');
+                    this.logger.sendTaskLog('已清空之前的未完成任务', 'success');
                 } catch (error) {
                     console.log('⚠️ 清空任务时出现警告:', error.message);
+                    this.logger.sendWarningLog(`清空任务时出现警告: ${error.message}`);
                 }
             }
             
             // 创建批量处理器
             console.log('🔧 正在创建批量处理器...');
+            this.logger.sendTaskLog('正在创建批量处理器...', 'info');
             this.batchProcessor = new BatchProcessor({
                 restaurants,
                 outputPath,
                 options: options || {},
-                io: this.io
+                io: this.io,
+                logger: this.logger, // 传递日志管理器
+                webInterface: this // 传递Web界面实例
             });
             
             // 开始处理
             console.log('🚀 正在启动批量处理任务...');
+            this.logger.sendTaskLog('正在启动批量处理任务...', 'info');
+            
+            // 启动心跳检测
+            this.startHeartbeat();
+            
             await this.batchProcessor.start();
             
             // 发送启动成功消息
-            this.io.emit('log', {
-                timestamp: new Date().toISOString(),
-                level: 'info',
-                message: '服务状态:任务已启动'
-            });
+            this.logger.sendServiceLog('任务已启动', 'success');
             
             res.json({
                 success: true,
@@ -182,6 +206,7 @@ class WebInterface {
             
         } catch (error) {
             console.error('启动任务失败:', error);
+            this.logger.sendErrorLog('启动任务失败', error);
             res.status(500).json({
                 success: false,
                 error: error.message
@@ -205,6 +230,9 @@ class WebInterface {
             
             await this.batchProcessor.stop();
             
+            // 停止心跳检测
+            this.stopHeartbeat();
+            
             res.json({
                 success: true,
                 message: '任务已停止'
@@ -212,6 +240,41 @@ class WebInterface {
             
         } catch (error) {
             console.error('停止任务失败:', error);
+            this.logger.sendErrorLog('停止任务失败', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * 处理停止心跳检测请求
+     * @param {Object} req - 请求对象
+     * @param {Object} res - 响应对象
+     */
+    async handleStopHeartbeat(req, res) {
+        try {
+            console.log('🛑 手动停止心跳检测请求');
+            this.logger.sendServiceLog('手动停止心跳检测请求', 'warning');
+            
+            // 停止心跳检测
+            this.stopHeartbeat();
+            
+            // 发送停止通知到前端
+            this.io.emit('heartbeat_stopped', {
+                timestamp: new Date().toISOString(),
+                message: '心跳检测已手动停止'
+            });
+            
+            res.json({
+                success: true,
+                message: '心跳检测已停止'
+            });
+            
+        } catch (error) {
+            console.error('停止心跳检测失败:', error);
+            this.logger.sendErrorLog('停止心跳检测失败', error);
             res.status(500).json({
                 success: false,
                 error: error.message
@@ -233,6 +296,7 @@ class WebInterface {
             });
         } catch (error) {
             console.error('获取状态失败:', error);
+            this.logger.sendErrorLog('获取状态失败', error);
             res.status(500).json({
                 success: false,
                 error: error.message
@@ -254,6 +318,7 @@ class WebInterface {
             });
         } catch (error) {
             console.error('获取日志失败:', error);
+            this.logger.sendErrorLog('获取日志失败', error);
             res.status(500).json({
                 success: false,
                 error: error.message
@@ -280,6 +345,7 @@ class WebInterface {
             });
         } catch (error) {
             console.error('保存配置失败:', error);
+            this.logger.sendErrorLog('保存配置失败', error);
             res.status(500).json({
                 success: false,
                 error: error.message
@@ -310,6 +376,7 @@ class WebInterface {
             }
         } catch (error) {
             console.error('加载配置失败:', error);
+            this.logger.sendErrorLog('加载配置失败', error);
             res.status(500).json({
                 success: false,
                 error: error.message
@@ -359,6 +426,7 @@ class WebInterface {
             });
         } catch (error) {
             console.error('检查登录状态失败:', error);
+            this.logger.sendErrorLog('检查登录状态失败', error);
             res.status(500).json({
                 success: false,
                 error: error.message
@@ -387,6 +455,7 @@ class WebInterface {
             await fs.writeJson(cookieFile, cookies, { spaces: 2 });
             
             console.log(`✅ 已保存 ${cookies.length} 个Cookie到文件`);
+            this.logger.sendSuccessLog(`已保存 ${cookies.length} 个Cookie到文件`);
             
             res.json({
                 success: true,
@@ -397,6 +466,7 @@ class WebInterface {
             });
         } catch (error) {
             console.error('保存Cookie失败:', error);
+            this.logger.sendErrorLog('保存Cookie失败', error);
             res.status(500).json({
                 success: false,
                 error: error.message
@@ -421,6 +491,7 @@ class WebInterface {
             }
             
             console.log(`🔍 开始处理 ${cookies.length} 个Cookie...`);
+            this.logger.sendInfoLog(`开始处理 ${cookies.length} 个Cookie...`);
             
             // 使用简单的Cookie验证方法
             const { validateAndSaveCookies } = require('../simple-cookie-validator');
@@ -428,6 +499,7 @@ class WebInterface {
             
             if (result.success) {
                 console.log(`✅ Cookie保存成功: ${result.data.count} 个Cookie`);
+                this.logger.sendSuccessLog(`Cookie保存成功: ${result.data.count} 个Cookie`);
                 res.json({
                     success: true,
                     data: {
@@ -438,6 +510,7 @@ class WebInterface {
                 });
             } else {
                 console.log(`❌ Cookie保存失败: ${result.message}`);
+                this.logger.sendErrorLog(`Cookie保存失败: ${result.message}`);
                 res.json({
                     success: true,
                     data: {
@@ -450,6 +523,7 @@ class WebInterface {
             
         } catch (error) {
             console.error('Cookie处理失败:', error);
+            this.logger.sendErrorLog('Cookie处理失败', error);
             res.json({
                 success: false,
                 error: error.message
@@ -462,20 +536,35 @@ class WebInterface {
      * @returns {Object} 当前状态信息
      */
     getCurrentStatus() {
+        const baseStatus = {
+            isRunning: false,
+            progress: 0,
+            currentRestaurant: null,
+            totalRestaurants: 0,
+            completedRestaurants: 0,
+            totalImages: 0,
+            downloadedImages: 0,
+            errors: [],
+            heartbeat: {
+                isActive: !!(this.heartbeatInterval || this.statusUpdateInterval),
+                heartbeatInterval: !!this.heartbeatInterval,
+                statusUpdateInterval: !!this.statusUpdateInterval
+            }
+        };
+        
         if (!this.batchProcessor) {
-            return {
-                isRunning: false,
-                progress: 0,
-                currentRestaurant: null,
-                totalRestaurants: 0,
-                completedRestaurants: 0,
-                totalImages: 0,
-                downloadedImages: 0,
-                errors: []
-            };
+            return baseStatus;
         }
         
-        return this.batchProcessor.getStatus();
+        const batchStatus = this.batchProcessor.getStatus();
+        return {
+            ...batchStatus,
+            heartbeat: {
+                isActive: !!(this.heartbeatInterval || this.statusUpdateInterval),
+                heartbeatInterval: !!this.heartbeatInterval,
+                statusUpdateInterval: !!this.statusUpdateInterval
+            }
+        };
     }
 
     /**
@@ -492,8 +581,8 @@ class WebInterface {
      * @private
      */
     startHeartbeat() {
-        // 每30秒发送一次心跳检测
-        setInterval(() => {
+        // 每60秒发送一次心跳检测，减少频率
+        this.heartbeatInterval = setInterval(() => {
             if (this.batchProcessor && this.batchProcessor.isRunning()) {
                 const status = this.getCurrentStatus();
                 this.io.emit('heartbeat', {
@@ -502,11 +591,12 @@ class WebInterface {
                     message: '服务状态:心跳检测正常'
                 });
                 console.log('💓 心跳检测: 服务运行正常');
+                this.logger.sendServiceLog('心跳检测正常', 'info');
             }
-        }, 30000); // 30秒间隔
+        }, 60000); // 60秒间隔
         
         // 每5分钟发送一次详细状态更新
-        setInterval(() => {
+        this.statusUpdateInterval = setInterval(() => {
             if (this.batchProcessor && this.batchProcessor.isRunning()) {
                 const status = this.getCurrentStatus();
                 this.io.emit('detailed_status', {
@@ -515,8 +605,44 @@ class WebInterface {
                     message: '服务状态:详细状态更新'
                 });
                 console.log('📊 详细状态更新: 服务运行正常');
+                this.logger.sendServiceLog('详细状态更新', 'info');
             }
         }, 300000); // 5分钟间隔
+    }
+
+    /**
+     * 停止心跳检测
+     * @private
+     */
+    stopHeartbeat() {
+        let stoppedCount = 0;
+        
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+            stoppedCount++;
+            console.log('💓 心跳检测已停止');
+            this.logger.sendServiceLog('心跳检测已停止', 'info');
+        }
+        
+        if (this.statusUpdateInterval) {
+            clearInterval(this.statusUpdateInterval);
+            this.statusUpdateInterval = null;
+            stoppedCount++;
+            console.log('📊 状态更新已停止');
+            this.logger.sendServiceLog('状态更新已停止', 'info');
+        }
+        
+        // 发送停止通知到所有客户端
+        if (this.io) {
+            this.io.emit('heartbeat_stopped', {
+                timestamp: new Date().toISOString(),
+                message: `心跳检测已停止 (清理了 ${stoppedCount} 个定时器)`,
+                stoppedTimers: stoppedCount
+            });
+        }
+        
+        console.log(`🛑 心跳检测清理完成，共清理了 ${stoppedCount} 个定时器`);
     }
 
     /**
@@ -532,16 +658,20 @@ class WebInterface {
                 console.log(`🚀 Web界面服务器已启动`);
                 console.log(`📱 访问地址: http://${this.host}:${this.port}`);
                 console.log(`⏹️  按 Ctrl+C 停止服务器`);
+                this.logger.sendServiceLog('Web界面服务器已启动', 'success');
+                this.logger.sendServiceLog(`访问地址: http://${this.host}:${this.port}`, 'info');
             });
             
             // 优雅关闭
             process.on('SIGINT', () => {
                 console.log('\n🛑 正在关闭服务器...');
+                this.logger.sendServiceLog('正在关闭服务器...', 'warning');
                 this.stop();
             });
             
         } catch (error) {
             console.error('❌ 启动服务器失败:', error);
+            this.logger.sendErrorLog('启动服务器失败', error);
             throw error;
         }
     }
@@ -559,11 +689,13 @@ class WebInterface {
             // 关闭服务器
             this.server.close(() => {
                 console.log('✅ 服务器已关闭');
+                this.logger.sendServiceLog('服务器已关闭', 'success');
                 process.exit(0);
             });
             
         } catch (error) {
             console.error('❌ 关闭服务器失败:', error);
+            this.logger.sendErrorLog('关闭服务器失败', error);
             process.exit(1);
         }
     }

@@ -33,6 +33,8 @@ class BatchProcessor {
             ...options.options
         };
         this.io = options.io;
+        this.logger = options.logger; // 日志管理器
+        this.webInterface = options.webInterface; // Web界面实例
         
         // 状态管理
         this._isRunning = false;
@@ -194,10 +196,8 @@ class BatchProcessor {
             }
         }
         
-        // 所有任务完成
-        if (this._isRunning) {
-            this.complete();
-        }
+        // 所有任务完成 - 无论_isRunning状态如何，都要调用complete()
+        this.complete();
     }
 
     /**
@@ -240,11 +240,16 @@ class BatchProcessor {
                 timeout: this.options.timeout,
                 tryRemoveWatermark: this.options.tryRemoveWatermark,
                 enableImageProcessing: this.options.enableImageProcessing,
+                logger: this.logger, // 传递日志管理器
                 login: {
                     method: 'manual',
                     autoLogin: true,
                     saveCookies: true,
                     cookieFile: './cookies.json'
+                },
+                logCallback: (message, level) => {
+                    // 将爬虫的日志转发到批量处理器
+                    this.log(message, level);
                 }
             });
             
@@ -353,8 +358,8 @@ class BatchProcessor {
             const checkInterval = setInterval(() => {
                 checkCount++;
                 
-                // 每5秒输出一次等待状态，包含更详细的信息
-                if (checkCount % 5 === 0) {
+                // 每30秒输出一次等待状态，减少日志频率
+                if (checkCount % 30 === 0) {
                     const activeTaskDetails = Array.from(this.activeTasks).map(task => {
                         return {
                             restaurant: task.restaurant?.name || 'Unknown',
@@ -370,7 +375,10 @@ class BatchProcessor {
                 
                 if (this.activeTasks.size < this.options.maxConcurrent || !this._isRunning) {
                     clearInterval(checkInterval);
-                    this.log(`✅ 等待完成，活跃任务数: ${this.activeTasks.size}`, 'info');
+                    // 只在有活跃任务完成时才输出日志，避免频繁输出
+                    if (this.activeTasks.size > 0) {
+                        this.log(`✅ 等待完成，活跃任务数: ${this.activeTasks.size}`, 'info');
+                    }
                     resolve();
                 }
             }, 1000);
@@ -382,7 +390,9 @@ class BatchProcessor {
      * @private
      */
     complete() {
+        // 确保任务状态为完成
         this._isRunning = false;
+        this.isPaused = false;
         this.stats.endTime = new Date();
         
         const duration = this.stats.endTime - this.stats.startTime;
@@ -398,7 +408,40 @@ class BatchProcessor {
         this.log(`   - 下载失败: ${this.stats.failedImages}`, 'info');
         this.log(`   - 耗时: ${durationMinutes} 分钟`, 'info');
         
+        // 更新所有餐馆进度为完成状态
+        this.restaurantProgress.forEach((progress, index) => {
+            if (progress.status === 'processing' || progress.status === 'pending') {
+                progress.status = 'completed';
+                progress.progress = 100;
+            }
+        });
+        
+        // 发送最终状态更新
         this.emitStatus();
+        
+        // 通知Web界面任务已完成，可以停止心跳检测
+        if (this.webInterface) {
+            // 直接调用Web界面的方法停止心跳检测
+            this.webInterface.stopHeartbeat();
+            
+            // 发送任务完成通知到所有客户端
+            this.io.emit('task_completed', {
+                timestamp: new Date().toISOString(),
+                message: '所有任务已完成，停止心跳检测',
+                stats: this.stats,
+                restaurantProgress: this.restaurantProgress
+            });
+            
+            // 发送最终完成通知
+            this.io.emit('task_final_completed', {
+                timestamp: new Date().toISOString(),
+                message: '所有任务已完成，前端日志将停止',
+                stats: this.stats,
+                restaurantProgress: this.restaurantProgress
+            });
+        }
+        
+        this.log(`✅ 任务完成事件已发送，心跳检测应该停止`, 'success');
     }
 
     /**
