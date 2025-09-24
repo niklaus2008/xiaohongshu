@@ -114,11 +114,15 @@ class BatchProcessor {
             
             // 新增：预登录阶段
             this.log(`🔐 开始预登录阶段...`, 'info');
+            console.log('🚀 启动预登录功能，避免重复登录问题...');
             const loginSuccess = await this.preLogin();
             if (!loginSuccess) {
-                throw new Error('预登录失败，无法继续批量处理');
+                console.error('❌ 预登录失败，系统将回退到旧登录逻辑');
+                this.log('⚠️ 预登录失败，将使用传统登录方式', 'warning');
+            } else {
+                console.log('✅ 预登录成功，所有爬虫实例将共享登录状态');
+                this.log(`✅ 预登录完成，开始批量处理...`, 'success');
             }
-            this.log(`✅ 预登录完成，开始批量处理...`, 'success');
             
             // 开始处理任务
             this.log(`🎯 开始处理任务队列...`, 'info');
@@ -193,6 +197,11 @@ class BatchProcessor {
                 // 发送预登录完成状态
                 this.emitPreLoginStatus(false, 100);
                 this.log('🎉 预登录完成，所有爬虫实例将共享此登录状态', 'success');
+                
+                // 重置全局登录状态，避免后续实例被阻止
+                const globalLoginManager = require('./global-login-manager');
+                globalLoginManager.resetReopenCount();
+                
                 return true;
             } else {
                 this.log('❌ 登录失败，清理资源...', 'error');

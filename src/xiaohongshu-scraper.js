@@ -142,6 +142,47 @@ class XiaohongshuScraper {
     }
 
     /**
+     * 检测跨窗口登录状态变化
+     * @private
+     * @returns {Promise<boolean>} 是否检测到登录状态变化
+     */
+    async detectCrossWindowLoginChange() {
+        try {
+            console.log('🔍 检测跨窗口登录状态变化...');
+            
+            // 刷新页面以获取最新状态
+            await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+            await this.page.waitForTimeout(3000);
+            
+            // 检查登录状态
+            const loginStatus = await this.getUnifiedLoginStatus();
+            
+            if (loginStatus.isLoggedIn) {
+                console.log('✅ 检测到登录状态变化：已登录');
+                
+                // 保存新的Cookie到文件
+                if (this.loginConfig && this.loginConfig.saveCookies) {
+                    await this.saveCookies();
+                    console.log('💾 已保存新的登录Cookie');
+                }
+                
+                // 通知前端登录状态变化
+                if (this.webInterface) {
+                    this.notifyFrontendLoginStatus('success', '检测到登录状态变化，登录成功！');
+                }
+                
+                return true;
+            } else {
+                console.log('⚠️ 未检测到登录状态变化');
+                return false;
+            }
+        } catch (error) {
+            console.error('检测跨窗口登录状态变化失败:', error);
+            return false;
+        }
+    }
+
+    /**
      * 日志记录方法（使用全局去重机制）
      * @private
      * @param {string} message - 日志消息
@@ -832,6 +873,15 @@ class XiaohongshuScraper {
                         hasLoginPrompts: pageState.hasLoginPrompts,
                         loginElements: pageState.loginElements
                     });
+                    
+                    // 每10秒也检测一次跨窗口登录状态
+                    console.log('🔍 定期检测跨窗口登录状态...');
+                    const crossWindowLogin = await this.detectCrossWindowLoginChange();
+                    if (crossWindowLogin) {
+                        console.log('🎉 定期检测发现跨窗口登录成功！');
+                        this._cookieValidationPerformed = false;
+                        return true;
+                    }
                 }
                 
                 // 检查是否登录成功（避免重复验证Cookie）
@@ -842,6 +892,17 @@ class XiaohongshuScraper {
                     // 重置Cookie验证标记，允许重新验证
                     this._cookieValidationPerformed = false;
                     return true;
+                }
+                
+                // 每30秒检测一次跨窗口登录状态变化
+                if (elapsedTime % 30000 === 0 && elapsedTime > 0) {
+                    console.log('🔍 检测跨窗口登录状态变化...');
+                    const crossWindowLogin = await this.detectCrossWindowLoginChange();
+                    if (crossWindowLogin) {
+                        console.log('🎉 检测到跨窗口登录成功！');
+                        this._cookieValidationPerformed = false;
+                        return true;
+                    }
                 }
                 
                 // 检查登录弹窗是否消失
@@ -1263,10 +1324,6 @@ class XiaohongshuScraper {
      */
     async checkLoginStatus() {
         try {
-            // 使用全局状态管理器检查是否可以开始登录处理
-            if (!globalLoginManager.canStartLoginProcess(this.instanceId)) {
-                return false;
-            }
             console.log('🔍 检查登录状态...');
             
             // 首先检查Cookie是否有效
@@ -3021,16 +3078,18 @@ class XiaohongshuScraper {
             // 第二步：检查页面登录状态
             const pageLoggedIn = await this.checkLoginStatus();
             
-            // 第三步：综合判断（更严格的标准）
+            // 第三步：综合判断（优化标准）
             const finalScore = cookieScore;
-            const isLoggedIn = pageLoggedIn && cookieScore >= 3; // 提高阈值到3
+            // 如果Cookie评分很高（>=8），即使页面检测失败也认为已登录
+            const isLoggedIn = (pageLoggedIn && cookieScore >= 3) || cookieScore >= 8;
             
             console.log('🔍 统一登录状态检测结果:', {
                 cookieScore,
                 pageLoggedIn,
                 finalScore,
                 isLoggedIn,
-                threshold: 3
+                threshold: 3,
+                reason: isLoggedIn ? '登录成功' : (cookieScore >= 8 ? 'Cookie评分高但页面检测失败' : 'Cookie评分不足')
             });
             
             return {

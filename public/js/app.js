@@ -39,6 +39,7 @@ class XiaohongshuDownloaderApp {
         this.bindEvents();
         this.loadConfig();
         this.checkLoginStatus();
+        this.initCrossWindowLoginDetection();
         this.updateUI();
     }
 
@@ -661,6 +662,7 @@ class XiaohongshuDownloaderApp {
         
         // 更新状态
         const currentStatus = document.getElementById('currentStatus');
+        const checkBtn = document.getElementById('checkCrossWindowLoginBtn');
         let statusBadge = '';
         if (this.currentStatus.isPreLogin) {
             statusBadge = '<span class="badge bg-info">预登录中</span>';
@@ -669,9 +671,13 @@ class XiaohongshuDownloaderApp {
                 statusBadge = '<span class="badge bg-warning">已暂停</span>';
             } else {
                 statusBadge = '<span class="badge bg-success">运行中</span>';
+                // 运行中时显示检测按钮
+                if (checkBtn) checkBtn.style.display = 'inline-block';
             }
         } else {
             statusBadge = '<span class="badge bg-secondary">待机</span>';
+            // 待机时隐藏检测按钮
+            if (checkBtn) checkBtn.style.display = 'none';
         }
         currentStatus.innerHTML = statusBadge;
         
@@ -950,6 +956,56 @@ class XiaohongshuDownloaderApp {
         // 添加服务启动日志
         this.addLog('服务状态：Web界面已启动', 'success');
         this.addLog('服务状态：等待用户操作', 'info');
+    }
+
+    /**
+     * 初始化跨窗口登录检测
+     */
+    initCrossWindowLoginDetection() {
+        const checkBtn = document.getElementById('checkCrossWindowLoginBtn');
+        if (checkBtn) {
+            checkBtn.addEventListener('click', () => this.checkCrossWindowLogin());
+        }
+    }
+
+    /**
+     * 检查跨窗口登录状态
+     */
+    async checkCrossWindowLogin() {
+        try {
+            const checkBtn = document.getElementById('checkCrossWindowLoginBtn');
+            if (checkBtn) {
+                checkBtn.disabled = true;
+                checkBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>检测中...';
+            }
+
+            const response = await fetch('/api/login/check-cross-window', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.addLog('✅ 检测到跨窗口登录成功！', 'success');
+                // 刷新登录状态
+                await this.checkLoginStatus();
+            } else {
+                this.addLog('⚠️ 未检测到登录状态变化', 'warning');
+            }
+
+        } catch (error) {
+            console.error('跨窗口登录检测失败:', error);
+            this.addLog('❌ 跨窗口登录检测失败: ' + error.message, 'error');
+        } finally {
+            const checkBtn = document.getElementById('checkCrossWindowLoginBtn');
+            if (checkBtn) {
+                checkBtn.disabled = false;
+                checkBtn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>检测登录状态';
+            }
+        }
     }
 
     /**

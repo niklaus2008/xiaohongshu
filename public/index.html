@@ -204,7 +204,7 @@
 
                         <!-- 当前任务信息 - 紧凑布局 -->
                         <div class="row mb-3">
-                            <div class="col-md-8">
+                            <div class="col-md-6">
                                 <div class="d-flex align-items-center">
                                     <i class="fas fa-utensils me-2 text-primary"></i>
                                     <div>
@@ -213,12 +213,20 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-4">
-                                <div class="text-end">
+                            <div class="col-md-3">
+                                <div class="text-center">
                                     <small class="text-muted d-block">状态</small>
                                     <span id="currentStatus">
                                         <span class="badge bg-secondary">待机</span>
                                     </span>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-end">
+                                    <button id="checkCrossWindowLoginBtn" class="btn btn-sm btn-outline-info" style="display: none;">
+                                        <i class="fas fa-sync-alt me-1"></i>
+                                        检测登录状态
+                                    </button>
                                 </div>
                             </div>
                         </div>

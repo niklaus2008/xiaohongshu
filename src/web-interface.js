@@ -192,6 +192,7 @@ class WebInterface {
         this.app.get('/api/login/validate-file', this.handleValidateCookieFile.bind(this));
         this.app.post('/api/login/reset', this.handleResetLoginWindow.bind(this));
         this.app.post('/api/open-browser', this.handleOpenBrowser.bind(this));
+        this.app.post('/api/login/check-cross-window', this.handleCheckCrossWindowLogin.bind(this));
         
         // 错误处理中间件
         this.app.use((err, req, res, next) => {
@@ -923,6 +924,66 @@ class WebInterface {
             console.error('❌ 启动服务器失败:', error);
             this.logger.sendErrorLog('启动服务器失败', error);
             throw error;
+        }
+    }
+
+    /**
+     * 处理跨窗口登录检测请求
+     * @param {Object} req - 请求对象
+     * @param {Object} res - 响应对象
+     */
+    async handleCheckCrossWindowLogin(req, res) {
+        try {
+            console.log('🔍 手动触发跨窗口登录检测...');
+            
+            if (!this.browserInstance || !this.isBrowserInitialized) {
+                return res.status(400).json({
+                    success: false,
+                    error: '浏览器未初始化'
+                });
+            }
+            
+            // 创建临时爬虫实例进行检测
+            const { XiaohongshuScraper } = require('./xiaohongshu-scraper');
+            const tempScraper = new XiaohongshuScraper({
+                headless: false,
+                browserType: 'user-browser'
+            });
+            
+            // 使用现有浏览器实例
+            tempScraper.browser = this.browserInstance;
+            tempScraper.page = await this.browserInstance.newPage();
+            
+            // 检测跨窗口登录状态
+            const loginDetected = await tempScraper.detectCrossWindowLoginChange();
+            
+            if (loginDetected) {
+                console.log('✅ 检测到跨窗口登录成功！');
+                this.logger.sendServiceLog('检测到跨窗口登录成功！', 'success');
+                
+                res.json({
+                    success: true,
+                    message: '检测到登录状态变化',
+                    isLoggedIn: true
+                });
+            } else {
+                console.log('⚠️ 未检测到跨窗口登录状态变化');
+                this.logger.sendServiceLog('未检测到跨窗口登录状态变化', 'warning');
+                
+                res.json({
+                    success: false,
+                    message: '未检测到登录状态变化',
+                    isLoggedIn: false
+                });
+            }
+            
+        } catch (error) {
+            console.error('跨窗口登录检测失败:', error);
+            this.logger.sendErrorLog('跨窗口登录检测失败', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
         }
     }
 

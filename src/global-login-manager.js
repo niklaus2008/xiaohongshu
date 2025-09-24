@@ -36,8 +36,8 @@ class GlobalLoginManager {
             return false;
         }
         
-        // 检查重新打开次数
-        if (this._globalState.reopenCount >= 3) {
+        // 检查重新打开次数（放宽限制，允许更多重试）
+        if (this._globalState.reopenCount >= 10) {
             console.log(`⚠️ 全局状态：重新打开登录页面次数过多，实例 ${instanceId} 跳过处理`);
             return false;
         }
@@ -161,6 +161,15 @@ class GlobalLoginManager {
         };
         this._logCache.clear();
         console.log('🔄 全局登录状态已重置');
+    }
+
+    /**
+     * 重置重新打开计数（用于预登录成功后）
+     */
+    resetReopenCount() {
+        this._globalState.reopenCount = 0;
+        this._globalState.isReopening = false;
+        console.log('🔄 重新打开计数已重置');
     }
 }
 
