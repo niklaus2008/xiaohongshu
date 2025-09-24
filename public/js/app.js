@@ -20,10 +20,13 @@ class XiaohongshuDownloaderApp {
             totalImages: 0,
             downloadedImages: 0,
             failedImages: 0,
-            restaurantProgress: [] // 每个餐馆的进度信息
+            restaurantProgress: [], // 每个餐馆的进度信息
+            isPreLogin: false, // 预登录状态
+            preLoginProgress: 0 // 预登录进度
         };
         this.logs = [];
         this.editingRestaurantIndex = -1;
+        this.isLoginWindowOpen = false; // 登录窗口状态标记
         
         this.init();
     }
@@ -62,6 +65,13 @@ class XiaohongshuDownloaderApp {
             this.updateStatusUI();
             // 添加服务状态日志
             this.addServiceStatusLogs(status);
+        });
+        
+        // 预登录状态更新
+        this.socket.on('preLoginStatus', (data) => {
+            this.currentStatus.isPreLogin = data.isPreLogin;
+            this.currentStatus.preLoginProgress = data.progress || 0;
+            this.updateStatusUI();
         });
         
         this.socket.on('log', (logEntry) => {
@@ -158,6 +168,10 @@ class XiaohongshuDownloaderApp {
         
         document.getElementById('checkLoginBtn').addEventListener('click', () => {
             this.checkLoginStatus();
+        });
+        
+        document.getElementById('resetLoginBtn').addEventListener('click', () => {
+            this.resetLoginWindow();
         });
         
         // 登录模态框事件
@@ -637,7 +651,9 @@ class XiaohongshuDownloaderApp {
         
         // 更新当前餐馆信息
         const currentRestaurant = document.getElementById('currentRestaurant');
-        if (this.currentStatus.currentRestaurant) {
+        if (this.currentStatus.isPreLogin) {
+            currentRestaurant.textContent = `预登录中... (${this.currentStatus.preLoginProgress}%)`;
+        } else if (this.currentStatus.currentRestaurant) {
             currentRestaurant.textContent = `${this.currentStatus.currentRestaurant.name} (${this.currentStatus.currentRestaurant.location})`;
         } else {
             currentRestaurant.textContent = '暂无';
@@ -646,7 +662,9 @@ class XiaohongshuDownloaderApp {
         // 更新状态
         const currentStatus = document.getElementById('currentStatus');
         let statusBadge = '';
-        if (this.currentStatus.isRunning) {
+        if (this.currentStatus.isPreLogin) {
+            statusBadge = '<span class="badge bg-info">预登录中</span>';
+        } else if (this.currentStatus.isRunning) {
             if (this.currentStatus.isPaused) {
                 statusBadge = '<span class="badge bg-warning">已暂停</span>';
             } else {
@@ -939,19 +957,57 @@ class XiaohongshuDownloaderApp {
      */
     async checkLoginStatus() {
         try {
-            const response = await fetch('/api/login/status');
-            const result = await response.json();
+            console.log('🔍 开始检查登录状态并验证Cookie有效性...');
             
-            if (result.success) {
-                this.updateLoginStatus(result.data);
+            // 首先检查基本登录状态
+            const statusResponse = await fetch('/api/login/status');
+            const statusResult = await statusResponse.json();
+            
+            if (statusResult.success && statusResult.data.isLoggedIn) {
+                // 如果基本状态显示已登录，进行Cookie有效性验证
+                console.log('📊 基本登录状态正常，开始验证Cookie有效性...');
+                
+                const validateResponse = await fetch('/api/login/validate-file');
+                const validateResult = await validateResponse.json();
+                
+                if (validateResult.success) {
+                    const validationData = validateResult.data;
+                    console.log('📊 Cookie验证结果:', {
+                        isValid: validationData.isValid,
+                        score: validationData.score,
+                        confidence: validationData.confidence
+                    });
+                    
+                    // 根据Cookie验证结果更新登录状态
+                    if (validationData.isValid) {
+                        this.updateLoginStatus({
+                            isLoggedIn: true,
+                            loginScore: validationData.score,
+                            cookieInfo: { count: validationData.cookieCount },
+                            message: `Cookie验证成功 (评分: ${validationData.score}/100)`
+                        });
+                    } else {
+                        this.updateLoginStatus({
+                            isLoggedIn: false,
+                            loginScore: validationData.score,
+                            message: `Cookie验证失败 (评分: ${validationData.score}/100)`
+                        });
+                    }
+                } else {
+                    // Cookie验证失败，使用基本状态
+                    console.log('⚠️ Cookie验证失败，使用基本登录状态');
+                    this.updateLoginStatus(statusResult.data);
+                }
             } else {
-                this.updateLoginStatus({ isLoggedIn: false, error: result.error });
+                // 基本状态显示未登录
+                this.updateLoginStatus(statusResult.data);
             }
         } catch (error) {
             console.error('检查登录状态失败:', error);
             this.updateLoginStatus({ isLoggedIn: false, error: error.message });
         }
     }
+
 
     /**
      * 更新登录状态显示
@@ -960,21 +1016,44 @@ class XiaohongshuDownloaderApp {
         const loginStatusDiv = document.getElementById('loginStatus');
         const loginBtn = document.getElementById('loginBtn');
         const checkLoginBtn = document.getElementById('checkLoginBtn');
+        const resetLoginBtn = document.getElementById('resetLoginBtn');
         
-        if (data.isLoggedIn) {
+        // 检查登录状态评分
+        const loginScore = data.loginScore || 0;
+        const isLoggedIn = data.isLoggedIn || false;
+        
+        if (isLoggedIn && loginScore > 0) {
+            // 已登录且评分正常
             loginStatusDiv.innerHTML = `
                 <div class="text-success">
                     <i class="fas fa-check-circle fa-2x mb-2"></i>
                     <p class="mb-0"><strong>已登录</strong></p>
-                    <small class="text-muted">Cookie数量: ${data.cookieInfo.count}</small>
+                    <small class="text-muted">Cookie数量: ${data.cookieInfo?.count || 0}</small>
                 </div>
             `;
             loginBtn.style.display = 'none';
             checkLoginBtn.style.display = 'block';
+            resetLoginBtn.style.display = 'none';
             
             // 启用开始下载按钮
             this.updateStartButton();
+        } else if (loginScore <= 0) {
+            // 登录状态评分过低，需要重新登录
+            loginStatusDiv.innerHTML = `
+                <div class="text-danger">
+                    <i class="fas fa-exclamation-triangle fa-2x mb-2"></i>
+                    <p class="mb-0"><strong>登录状态评分过低</strong></p>
+                    <small class="text-muted">评分: ${loginScore}，需要重新登录小红书</small>
+                </div>
+            `;
+            loginBtn.style.display = 'block';
+            checkLoginBtn.style.display = 'block';
+            resetLoginBtn.style.display = 'block';
+            
+            // 禁用开始下载按钮
+            document.getElementById('startBtn').disabled = true;
         } else {
+            // 未登录状态
             loginStatusDiv.innerHTML = `
                 <div class="text-warning">
                     <i class="fas fa-exclamation-triangle fa-2x mb-2"></i>
@@ -984,6 +1063,7 @@ class XiaohongshuDownloaderApp {
             `;
             loginBtn.style.display = 'block';
             checkLoginBtn.style.display = 'block';
+            resetLoginBtn.style.display = 'block';
             
             // 禁用开始下载按钮
             document.getElementById('startBtn').disabled = true;
@@ -993,41 +1073,113 @@ class XiaohongshuDownloaderApp {
     /**
      * 打开登录窗口
      */
-    openLoginModal() {
-        // 使用新窗口打开小红书登录页面
-        const loginUrl = 'https://www.xiaohongshu.com/explore';
-        const loginWindow = window.open(
-            loginUrl, 
-            'xiaohongshu_login', 
-            'width=800,height=600,scrollbars=yes,resizable=yes,status=yes,location=yes,toolbar=no,menubar=no'
-        );
+    async openLoginModal() {
+        // 防止重复打开登录窗口
+        if (this.isLoginWindowOpen) {
+            this.addLog('⚠️ 登录窗口已打开，请勿重复点击', 'warning');
+            this.addLog('💡 如果看不到登录窗口，请点击"重置登录状态"按钮', 'info');
+            return;
+        }
         
-        if (loginWindow) {
-            this.addLog('已打开小红书登录窗口，请完成登录', 'info');
+        try {
+            // 禁用登录按钮，防止重复点击
+            const loginBtn = document.getElementById('loginBtn');
+            if (loginBtn) {
+                loginBtn.disabled = true;
+                loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>正在打开登录窗口...';
+            }
             
-            // 监听窗口关闭事件
-            const checkClosed = setInterval(() => {
-                if (loginWindow.closed) {
-                    clearInterval(checkClosed);
-                    this.addLog('登录窗口已关闭，正在自动检测登录状态...', 'info');
-                    
-                    // 延迟检查登录状态，给用户时间完成登录
-                    setTimeout(() => {
-                        this.autoDetectLoginStatus();
-                    }, 2000);
+            this.addLog('🌐 正在通过后端API打开登录窗口...', 'info');
+            
+            // 调用后端API打开登录窗口
+            const response = await fetch('/api/open-browser', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    url: 'https://www.xiaohongshu.com/explore'
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // 标记登录窗口已打开
+                this.isLoginWindowOpen = true;
+                
+                this.addLog('✅ 登录窗口已通过后端API打开', 'success');
+                this.addLog('💡 请检查浏览器窗口，如果看不到请尝试以下方法：', 'info');
+                this.addLog('   - 按 Alt+Tab (Windows) 或 Cmd+Tab (Mac) 切换窗口', 'info');
+                this.addLog('   - 检查任务栏或Dock中的浏览器图标', 'info');
+                this.addLog('   - 查看是否有新的浏览器窗口被打开', 'info');
+                
+                // 显示登录按钮状态
+                if (loginBtn) {
+                    loginBtn.innerHTML = '<i class="fas fa-sign-in-alt me-1"></i>登录窗口已打开';
                 }
-            }, 1000);
+                
+                // 延迟检查登录状态
+                setTimeout(() => {
+                    this.addLog('💡 完成登录后，请点击"检查登录状态"按钮', 'info');
+                }, 3000);
+                
+            } else {
+                this.addLog(`❌ 打开登录窗口失败: ${result.error || '未知错误'}`, 'error');
+                this.addLog('💡 请尝试点击"重置登录状态"按钮后重试', 'info');
+                
+                // 恢复登录按钮状态
+                this.resetLoginButton();
+            }
             
-            // 显示提示信息
-            setTimeout(() => {
-                if (!loginWindow.closed) {
-                    this.addLog('💡 提示：完成登录后请关闭登录窗口，系统会自动检测登录状态', 'info');
+        } catch (error) {
+            console.error('打开登录窗口失败:', error);
+            this.addLog(`❌ 打开登录窗口失败: ${error.message}`, 'error');
+            this.addLog('💡 请检查网络连接或尝试点击"重置登录状态"按钮', 'info');
+            
+            // 恢复登录按钮状态
+            this.resetLoginButton();
+        }
+    }
+
+    /**
+     * 重置登录按钮状态
+     */
+    resetLoginButton() {
+        const loginBtn = document.getElementById('loginBtn');
+        if (loginBtn) {
+            loginBtn.disabled = false;
+            loginBtn.innerHTML = '<i class="fas fa-sign-in-alt me-1"></i>登录小红书';
+        }
+    }
+
+    /**
+     * 重置登录窗口状态
+     */
+    async resetLoginWindow() {
+        try {
+            this.addLog('🔄 正在重置登录窗口状态...', 'info');
+            
+            const response = await fetch('/api/login/reset', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
                 }
-            }, 3000);
+            });
             
-        } else {
-            this.addLog('❌ 无法打开登录窗口，可能被浏览器阻止了弹窗', 'error');
-            this.addLog('💡 请允许弹窗或手动访问：https://www.xiaohongshu.com/explore', 'info');
+            const result = await response.json();
+            
+            if (result.success) {
+                this.isLoginWindowOpen = false;
+                this.resetLoginButton();
+                this.addLog('✅ 登录窗口状态已重置', 'success');
+                this.addLog('💡 现在可以重新点击"登录小红书"按钮', 'info');
+            } else {
+                this.addLog(`❌ 重置失败: ${result.error}`, 'error');
+            }
+            
+        } catch (error) {
+            this.addLog(`❌ 重置登录窗口失败: ${error.message}`, 'error');
         }
     }
 
@@ -1045,6 +1197,8 @@ class XiaohongshuDownloaderApp {
             if (result.success && result.data.isLoggedIn) {
                 this.addLog('✅ 检测到已登录状态，无需重新登录', 'success');
                 this.checkLoginStatus();
+                // 更新下载按钮状态
+                this.updateStartButton();
                 return;
             }
             
@@ -1220,15 +1374,26 @@ class XiaohongshuDownloaderApp {
         fetch('/api/login/status')
             .then(response => response.json())
             .then(result => {
-                if (result.success && result.data.isLoggedIn && hasRestaurants) {
+                if (result.success && result.data.isLoggedIn && result.data.loginScore > 0 && hasRestaurants) {
                     startBtn.disabled = false;
+                    startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载';
                 } else {
                     startBtn.disabled = true;
+                    if (!hasRestaurants) {
+                        startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (请先添加餐馆)';
+                    } else if (!result.data.isLoggedIn) {
+                        startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (请先登录)';
+                    } else if (result.data.loginScore <= 0) {
+                        startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (登录状态评分过低)';
+                    } else {
+                        startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载';
+                    }
                 }
             })
             .catch(error => {
                 console.error('检查登录状态失败:', error);
                 startBtn.disabled = true;
+                startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (状态检查失败)';
             });
     }
 
@@ -1279,7 +1444,10 @@ class XiaohongshuDownloaderApp {
         this.heartbeatInterval = setInterval(() => {
             if (this.socket && this.socket.connected) {
                 this.socket.emit('ping');
-                this.addLog('服务状态：心跳检测正常', 'info');
+                // 减少日志输出，避免刷屏
+                if (Math.random() < 0.1) { // 只有10%的概率输出日志
+                    this.addLog('服务状态：心跳检测正常', 'info');
+                }
             } else {
                 this.addLog('服务状态：心跳检测失败', 'warning');
             }
@@ -1289,6 +1457,8 @@ class XiaohongshuDownloaderApp {
         this.socket.on('pong', () => {
             // 心跳响应，不添加日志避免刷屏
         });
+        
+        console.log('💓 前端心跳检测已启动');
     }
 
     /**

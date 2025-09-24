@@ -191,7 +191,6 @@ class WebInterface {
         this.app.post('/api/login/validate', this.handleCookieValidation.bind(this));
         this.app.get('/api/login/validate-file', this.handleValidateCookieFile.bind(this));
         this.app.post('/api/login/reset', this.handleResetLoginWindow.bind(this));
-        this.app.post('/api/open-browser', this.handleOpenBrowser.bind(this));
         
         // 错误处理中间件
         this.app.use((err, req, res, next) => {
@@ -504,6 +503,59 @@ class WebInterface {
                     isLoggedIn: result.isLoggedIn,
                     cookieInfo: result.cookieInfo,
                     loginScore: result.loginScore
+                }
+            });
+        } catch (error) {
+            console.error('检查登录状态失败:', error);
+            this.logger.sendErrorLog('检查登录状态失败', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
+                            cookie.name.includes('session') || 
+                            cookie.name.includes('token') || 
+                            cookie.name.includes('user') ||
+                            cookie.name.includes('auth')
+                        );
+                        
+                        // 基础评分：Cookie数量
+                        loginScore = validCookies.length;
+                        
+                        // 加分：重要Cookie类型
+                        loginScore += loginCookies.length * 2;
+                        
+                        // 加分：小红书特有的Cookie
+                        const xiaohongshuCookies = validCookies.filter(cookie => 
+                            cookie.name.includes('xiaohongshu') ||
+                            cookie.name.includes('xhs') ||
+                            cookie.name.includes('web_session') ||
+                            cookie.name.includes('web_sessionid')
+                        );
+                        loginScore += xiaohongshuCookies.length * 3;
+                        
+                        // 限制最高评分为10
+                        loginScore = Math.min(10, loginScore);
+                        
+                        console.log('🔍 登录评分计算:', {
+                            validCookies: validCookies.length,
+                            loginCookies: loginCookies.length,
+                            xiaohongshuCookies: xiaohongshuCookies.length,
+                            finalScore: loginScore
+                        });
+                    }
+                }
+            }
+            
+            console.log('📊 最终登录状态:', { isLoggedIn, loginScore, cookieCount: cookieInfo?.count });
+            
+            res.json({
+                success: true,
+                data: {
+                    isLoggedIn,
+                    cookieInfo,
+                    loginScore
                 }
             });
         } catch (error) {
@@ -1008,9 +1060,6 @@ class WebInterface {
                         }
                     });
                     
-                    // 设置Web接口实例，用于前端状态同步
-                    scraper.setWebInterface(this);
-                    
                     // 初始化浏览器
                     await scraper.initBrowser();
                     this.browserInstance = scraper.browser;
@@ -1041,21 +1090,6 @@ class WebInterface {
                 console.log('👁️ 已将登录页面置于前台');
                 this.logger.sendServiceLog('已将登录页面置于前台', 'info');
                 
-                // 尝试最大化窗口
-                try {
-                    await this.browserPage.evaluate(() => {
-                        if (window.screen && window.screen.availWidth && window.screen.availHeight) {
-                            window.resizeTo(window.screen.availWidth, window.screen.availHeight);
-                            window.moveTo(0, 0);
-                        }
-                    });
-                    console.log('🖥️ 已尝试最大化登录窗口');
-                    this.logger.sendServiceLog('已尝试最大化登录窗口', 'info');
-                } catch (error) {
-                    console.log('⚠️ 无法最大化窗口，但继续执行');
-                    this.logger.sendWarningLog('无法最大化窗口，但继续执行');
-                }
-                
                 // 标记登录窗口已打开
                 this.isLoginWindowOpen = true;
                 
@@ -1078,13 +1112,6 @@ class WebInterface {
                     this.logger.sendServiceLog('💡 请在打开的浏览器中完成小红书登录，然后点击"检查登录状态"', 'info');
                     this.logger.sendServiceLog('⚠️ 重要：请勿关闭浏览器窗口，完成登录后程序会自动检测状态', 'warning');
                 }
-                
-                // 添加窗口查找指导
-                this.logger.sendServiceLog('💡 如果看不到登录窗口，请尝试以下方法：', 'info');
-                this.logger.sendServiceLog('   - 按 Alt+Tab (Windows) 或 Cmd+Tab (Mac) 切换窗口', 'info');
-                this.logger.sendServiceLog('   - 检查任务栏或Dock中的浏览器图标', 'info');
-                this.logger.sendServiceLog('   - 查看是否有新的浏览器窗口被打开', 'info');
-                this.logger.sendServiceLog('   - 检查是否有浏览器窗口在后台运行', 'info');
                 
                 // 监听页面关闭事件
                 this.browserPage.on('close', () => {
@@ -1227,28 +1254,6 @@ class WebInterface {
                 success: false,
                 error: error.message
             });
-        }
-    }
-
-    /**
-     * 连接到用户当前浏览器
-     * @returns {Promise<Object|null>} 浏览器实例或null
-     */
-    async connectToUserBrowser() {
-        try {
-            console.log('🔧 尝试连接到用户当前浏览器...');
-            this.logger.sendServiceLog('尝试连接到用户当前浏览器', 'info');
-            
-            // 这里可以尝试连接到用户当前运行的浏览器
-            // 由于安全限制，我们暂时返回null，让系统创建新的浏览器实例
-            console.log('⚠️ 无法连接到用户浏览器，将创建新的浏览器实例');
-            this.logger.sendServiceLog('无法连接到用户浏览器，将创建新的浏览器实例', 'warning');
-            
-            return null;
-        } catch (error) {
-            console.error('连接用户浏览器失败:', error);
-            this.logger.sendErrorLog('连接用户浏览器失败', error);
-            return null;
         }
     }
 

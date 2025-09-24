@@ -110,22 +110,35 @@ class Logger {
         // 输出到终端
         if (this.enableTerminal) {
             const consoleMethod = level === 'warning' ? 'warn' : level;
-            if (this.originalConsole[consoleMethod] && typeof this.originalConsole[consoleMethod] === 'function') {
-                this.originalConsole[consoleMethod](...args);
-            } else {
-                // 如果方法不存在，使用log方法
-                this.originalConsole.log(...args);
+            try {
+                if (this.originalConsole[consoleMethod] && typeof this.originalConsole[consoleMethod] === 'function') {
+                    this.originalConsole[consoleMethod](...args);
+                } else {
+                    // 如果方法不存在，使用log方法
+                    this.originalConsole.log(...args);
+                }
+            } catch (error) {
+                // 如果终端输出失败（如EPIPE错误），静默处理
+                // 避免在日志记录过程中产生新的错误
+                if (error.code !== 'EPIPE') {
+                    console.error('Logger terminal output error:', error.message);
+                }
             }
         }
         
         // 发送到前端
         if (this.enableFrontend && this.io) {
-            this.sendToFrontend({
-                timestamp,
-                level,
-                message,
-                originalArgs: args
-            });
+            try {
+                this.sendToFrontend({
+                    timestamp,
+                    level,
+                    message,
+                    originalArgs: args
+                });
+            } catch (error) {
+                // 如果发送到前端失败，静默处理
+                // 避免在日志记录过程中产生新的错误
+            }
         }
     }
 
@@ -155,6 +168,11 @@ class Logger {
      */
     sendToFrontend(logEntry) {
         try {
+            // 检查Socket.IO连接是否可用
+            if (!this.io || !this.io.engine || this.io.engine.closed) {
+                return; // 如果连接不可用，静默跳过
+            }
+            
             // 通过Socket.IO发送到所有连接的客户端
             this.io.emit('log', {
                 timestamp: logEntry.timestamp,
@@ -163,8 +181,16 @@ class Logger {
                 source: 'terminal' // 标记来源为终端
             });
         } catch (error) {
-            // 如果发送失败，至少输出到终端
-            this.originalConsole.error('发送日志到前端失败:', error.message);
+            // 如果发送失败，静默处理，避免产生新的错误
+            // 特别是EPIPE错误，通常发生在客户端断开连接时
+            if (error.code !== 'EPIPE' && error.code !== 'ECONNRESET') {
+                // 只记录非管道错误
+                try {
+                    this.originalConsole.error('发送日志到前端失败:', error.message);
+                } catch (consoleError) {
+                    // 如果连console.error都失败，完全静默处理
+                }
+            }
         }
     }
 

@@ -9,6 +9,7 @@
 const { XiaohongshuScraper } = require('./xiaohongshu-scraper');
 const fs = require('fs-extra');
 const path = require('path');
+const globalLoginManager = require('./global-login-manager');
 
 class BatchProcessor {
     /**
@@ -24,7 +25,7 @@ class BatchProcessor {
         this.outputPath = options.outputPath;
         this.options = {
             maxImages: 20,
-            headless: true,
+            headless: false, // 显示浏览器窗口，确保用户能看到登录页面
             delay: 2000,
             timeout: 30000,
             tryRemoveWatermark: true,
@@ -64,6 +65,9 @@ class BatchProcessor {
             downloadedImages: 0,
             failedImages: 0
         };
+        
+        // 共享登录状态
+        this.sharedLoginState = null;
     }
 
     /**
@@ -73,6 +77,10 @@ class BatchProcessor {
         try {
             this.log('🧹 已清空之前的未完成任务', 'info');
             this.log('🚀 开始批量下载任务', 'info');
+            
+            // 重置全局登录状态
+            globalLoginManager.reset();
+            this.log('🔄 已重置全局登录状态管理器', 'info');
             this.log(`📊 总餐馆数: ${this.restaurants.length}`, 'info');
             this.log(`📁 输出目录: ${this.outputPath}`, 'info');
             this.log(`🖼️ 每个餐馆最大图片数: ${this.options.maxImages}`, 'info');
@@ -104,6 +112,14 @@ class BatchProcessor {
             
             this.emitStatus();
             
+            // 新增：预登录阶段
+            this.log(`🔐 开始预登录阶段...`, 'info');
+            const loginSuccess = await this.preLogin();
+            if (!loginSuccess) {
+                throw new Error('预登录失败，无法继续批量处理');
+            }
+            this.log(`✅ 预登录完成，开始批量处理...`, 'success');
+            
             // 开始处理任务
             this.log(`🎯 开始处理任务队列...`, 'info');
             await this.processTasks();
@@ -117,6 +133,116 @@ class BatchProcessor {
     }
 
     /**
+     * 预登录阶段 - 统一登录，避免重复登录
+     * @private
+     * @returns {Promise<boolean>} 登录是否成功
+     */
+    async preLogin() {
+        try {
+            // 发送预登录开始状态
+            this.emitPreLoginStatus(true, 10);
+            this.log('🔧 创建登录实例...', 'info');
+            
+            // 创建一个专门的登录实例
+            const { XiaohongshuScraper } = require('./xiaohongshu-scraper');
+            const loginScraper = new XiaohongshuScraper({
+                headless: false, // 显示浏览器窗口，让用户看到登录过程
+                browserType: 'chromium',
+                login: {
+                    method: 'manual',
+                    autoLogin: true,
+                    saveCookies: true,
+                    cookieFile: './cookies.json'
+                }
+            });
+            
+            // 设置Web接口实例，用于前端状态同步
+            if (this.webInterface) {
+                loginScraper.setWebInterface(this.webInterface);
+            }
+            
+            // 发送预登录进度更新
+            this.emitPreLoginStatus(true, 30);
+            this.log('🚀 初始化浏览器...', 'info');
+            // 初始化浏览器
+            await loginScraper.initBrowser();
+            
+            // 发送预登录进度更新
+            this.emitPreLoginStatus(true, 60);
+            this.log('🔐 开始登录流程...', 'info');
+            // 执行登录
+            const loginSuccess = await loginScraper.autoLogin();
+            
+            if (loginSuccess) {
+                // 发送预登录进度更新
+                this.emitPreLoginStatus(true, 90);
+                this.log('✅ 登录成功，保存共享状态...', 'success');
+                
+                // 获取当前页面的Cookie
+                const cookies = await loginScraper.page.context().cookies();
+                
+                // 保存登录状态，供后续爬虫使用
+                this.sharedLoginState = {
+                    isLoggedIn: true,
+                    browser: loginScraper.browser,
+                    page: loginScraper.page,
+                    cookies: cookies,
+                    scraper: loginScraper // 保持爬虫实例引用
+                };
+                
+                // 发送预登录完成状态
+                this.emitPreLoginStatus(false, 100);
+                this.log('🎉 预登录完成，所有爬虫实例将共享此登录状态', 'success');
+                return true;
+            } else {
+                this.log('❌ 登录失败，清理资源...', 'error');
+                await loginScraper.close();
+                // 发送预登录失败状态
+                this.emitPreLoginStatus(false, 0);
+                return false;
+            }
+        } catch (error) {
+            this.log(`预登录失败: ${error.message}`, 'error');
+            // 发送预登录失败状态
+            this.emitPreLoginStatus(false, 0);
+            return false;
+        }
+    }
+
+    /**
+     * 发送预登录状态更新
+     * @private
+     * @param {boolean} isPreLogin - 是否正在预登录
+     * @param {number} progress - 预登录进度 (0-100)
+     */
+    emitPreLoginStatus(isPreLogin, progress) {
+        if (this.io) {
+            this.io.emit('preLoginStatus', {
+                isPreLogin: isPreLogin,
+                progress: progress,
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
+    /**
+     * 清理共享登录状态
+     * @private
+     */
+    async cleanupSharedLoginState() {
+        if (this.sharedLoginState && this.sharedLoginState.scraper) {
+            try {
+                this.log('🧹 清理共享登录状态...', 'info');
+                await this.sharedLoginState.scraper.close();
+                this.sharedLoginState = null;
+                this.log('✅ 共享登录状态已清理', 'info');
+            } catch (error) {
+                this.log(`⚠️ 清理共享登录状态时出错: ${error.message}`, 'warning');
+            }
+        }
+    }
+
+    /**
      * 停止批量处理
      */
     async stop() {
@@ -124,6 +250,9 @@ class BatchProcessor {
             this.log('正在停止批量下载任务...', 'info');
             this._isRunning = false;
             this.isPaused = false;
+            
+            // 清理共享登录状态
+            await this.cleanupSharedLoginState();
             
             // 停止所有活跃任务
             for (const task of this.activeTasks) {
@@ -253,6 +382,17 @@ class BatchProcessor {
                 }
             });
             
+            // 设置Web接口实例，用于前端状态同步
+            if (this.webInterface) {
+                scraper.setWebInterface(this.webInterface);
+            }
+            
+            // 设置共享登录状态，避免重复登录
+            if (this.sharedLoginState) {
+                scraper.setSharedLoginState(this.sharedLoginState);
+                this.log(`🔄 为餐馆 "${restaurant.name}" 设置共享登录状态`, 'info');
+            }
+            
             task.scraper = scraper;
             const scraperInitTime = Date.now() - scraperStartTime;
             this.log(`✅ 爬虫实例初始化完成 (耗时: ${scraperInitTime}ms)`, 'info');
@@ -318,8 +458,13 @@ class BatchProcessor {
             this.log(`🧹 正在清理资源... (任务总耗时: ${totalTime}ms)`, 'info');
             if (task.scraper) {
                 try {
-                    await task.scraper.close();
-                    this.log(`✅ 爬虫实例已关闭`, 'info');
+                    // 注意：如果使用了共享登录状态，不要关闭共享的浏览器实例
+                    if (!this.sharedLoginState || task.scraper.browser !== this.sharedLoginState.browser) {
+                        await task.scraper.close();
+                        this.log(`✅ 爬虫实例已关闭`, 'info');
+                    } else {
+                        this.log(`🔄 跳过关闭共享浏览器实例`, 'info');
+                    }
                 } catch (closeError) {
                     this.log(`⚠️ 关闭爬虫实例时出错: ${closeError.message}`, 'warning');
                 }
