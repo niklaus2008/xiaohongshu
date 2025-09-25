@@ -218,10 +218,10 @@ class XiaohongshuScraper {
         // 使用全局日志管理器记录日志（自带去重）
         globalLoginManager.log(message, level, this.instanceId);
         
-        // 如果有日志管理器，使用它发送日志
-        if (this.logger) {
-            this.logger.sendCustomLog(message, level);
-        }
+        // 如果有日志管理器，使用它发送日志（已禁用前端转发）
+        // if (this.logger) {
+        //     this.logger.sendCustomLog(message, level);
+        // }
         
         // 如果有日志回调函数，也调用它（保持向后兼容）
         if (this.logCallback && typeof this.logCallback === 'function') {

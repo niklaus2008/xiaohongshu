@@ -217,7 +217,7 @@ class WebInterface {
         this.logger = getLogger({
             io: this.io,
             enableTerminal: true,
-            enableFrontend: true
+            enableFrontend: false  // 禁用前端日志转发
         });
         
         this.io.on('connection', (socket) => {

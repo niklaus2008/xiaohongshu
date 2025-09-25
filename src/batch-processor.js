@@ -660,10 +660,10 @@ class BatchProcessor {
             this.logs = this.logs.slice(-500);
         }
         
-        // 发送日志到客户端
-        if (this.io) {
-            this.io.emit('log', logEntry);
-        }
+        // 发送日志到客户端（已禁用）
+        // if (this.io) {
+        //     this.io.emit('log', logEntry);
+        // }
         
         // 控制台输出
         const levelEmoji = {
