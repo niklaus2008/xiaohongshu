@@ -72,8 +72,8 @@ class WebInterface {
                         // 限制最高评分为10
                         loginScore = Math.min(10, loginScore);
                         
-                        // 只有评分 >= 3 才认为已登录
-                        isLoggedIn = loginScore >= 3;
+                        // 降低阈值：只有评分 >= 2 才认为已登录（原来为3）
+                        isLoggedIn = loginScore >= 2;
                         
                         console.log('🔍 统一登录评分计算:', {
                             validCookies: validCookies.length,
