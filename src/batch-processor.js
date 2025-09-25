@@ -428,19 +428,14 @@ class BatchProcessor {
                 scraper.setWebInterface(this.webInterface);
             }
             
+            // 初始化爬虫实例的浏览器实例
+            this.log(`🚀 初始化爬虫实例浏览器...`, 'info');
+            await scraper.initBrowser();
+            
             // 设置共享登录状态，避免重复登录
             if (this.sharedLoginState) {
                 scraper.setSharedLoginState(this.sharedLoginState);
                 this.log(`🔄 为餐馆 "${restaurant.name}" 设置共享登录状态`, 'info');
-                
-                // 为每个爬虫实例创建独立的页面，避免状态混乱
-                try {
-                    const newPage = await scraper.browser.newPage();
-                    scraper.page = newPage;
-                    this.log(`🆕 为餐馆 "${restaurant.name}" 创建独立页面`, 'info');
-                } catch (error) {
-                    this.log(`⚠️ 创建独立页面失败: ${error.message}`, 'warning');
-                }
             }
             
             task.scraper = scraper;

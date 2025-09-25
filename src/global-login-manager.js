@@ -11,7 +11,9 @@ class GlobalLoginManager {
             lastReopenTime: 0,
             reopenCount: 0,
             activeInstances: new Set(),
-            lastLoginCheck: 0
+            lastLoginCheck: 0,
+            loginCooldown: false, // 登录冷却期
+            loginCooldownEnd: 0    // 登录冷却期结束时间
         };
         
         // 全局日志缓存
@@ -20,6 +22,9 @@ class GlobalLoginManager {
         
         // 全局锁文件路径
         this._lockFile = './login.lock';
+        
+        // 处理锁，防止竞态条件
+        this._isProcessing = false;
     }
 
     /**
@@ -36,9 +41,9 @@ class GlobalLoginManager {
             return false;
         }
         
-        // 检查是否正在重新打开登录页面（延长等待时间）
-        if (this._globalState.isReopening && now - this._globalState.lastReopenTime < 60000) {
-            console.log(`⏳ 全局状态：正在重新打开登录页面，实例 ${instanceId} 等待中... (剩余时间: ${Math.ceil((60000 - (now - this._globalState.lastReopenTime)) / 1000)}秒)`);
+        // 检查是否正在重新打开登录页面（延长等待时间到2分钟，给用户更多时间完成扫码登录）
+        if (this._globalState.isReopening && now - this._globalState.lastReopenTime < 120000) {
+            console.log(`⏳ 全局状态：正在重新打开登录页面，实例 ${instanceId} 等待中... (剩余时间: ${Math.ceil((120000 - (now - this._globalState.lastReopenTime)) / 1000)}秒)`);
             return false;
         }
         
@@ -48,9 +53,15 @@ class GlobalLoginManager {
             return false;
         }
         
-        // 检查登录检查频率（增加间隔时间）
-        if (now - this._globalState.lastLoginCheck < 10000) {
-            console.log(`⏳ 全局状态：登录检查过于频繁，实例 ${instanceId} 跳过检查 (剩余时间: ${Math.ceil((10000 - (now - this._globalState.lastLoginCheck)) / 1000)}秒)`);
+        // 检查登录冷却期（如果正在冷却期，跳过登录检查）
+        if (this._globalState.loginCooldown && now < this._globalState.loginCooldownEnd) {
+            console.log(`⏳ 全局状态：登录冷却期中，实例 ${instanceId} 跳过检查 (剩余时间: ${Math.ceil((this._globalState.loginCooldownEnd - now) / 1000)}秒)`);
+            return false;
+        }
+        
+        // 检查登录检查频率（增加间隔时间到30秒，避免频繁检测）
+        if (now - this._globalState.lastLoginCheck < 30000) {
+            console.log(`⏳ 全局状态：登录检查过于频繁，实例 ${instanceId} 跳过检查 (剩余时间: ${Math.ceil((30000 - (now - this._globalState.lastLoginCheck)) / 1000)}秒)`);
             return false;
         }
         
@@ -63,38 +74,70 @@ class GlobalLoginManager {
      * @returns {boolean} 是否成功开始处理
      */
     startLoginProcess(instanceId) {
-        if (!this.canStartLoginProcess(instanceId)) {
+        // 使用同步锁防止竞态条件
+        if (this._isProcessing) {
+            console.log(`⏳ 全局状态：实例 ${instanceId} 等待中，其他实例正在处理...`);
             return false;
         }
         
-        const now = Date.now();
+        // 设置处理锁
+        this._isProcessing = true;
         
-        // 三重检查：确保没有其他实例正在处理（防止竞态条件）
-        if (this._globalState.activeInstances.size > 0) {
-            console.log(`⚠️ 全局状态：实例 ${instanceId} 启动时发现其他实例正在处理，拒绝启动`);
-            return false;
+        try {
+            // 五重检查：确保没有其他实例正在处理（防止竞态条件）
+            if (this._globalState.activeInstances.size > 0) {
+                console.log(`⚠️ 全局状态：实例 ${instanceId} 启动时发现其他实例正在处理，拒绝启动`);
+                this._isProcessing = false;
+                return false;
+            }
+            
+            // 检查是否正在重新打开登录页面
+            const now = Date.now();
+            if (this._globalState.isReopening && now - this._globalState.lastReopenTime < 120000) {
+                console.log(`⏳ 全局状态：正在重新打开登录页面，实例 ${instanceId} 等待中...`);
+                this._isProcessing = false;
+                return false;
+            }
+            
+            // 检查登录冷却期
+            if (this._globalState.loginCooldown && now < this._globalState.loginCooldownEnd) {
+                console.log(`⏳ 全局状态：登录冷却期中，实例 ${instanceId} 跳过检查`);
+                this._isProcessing = false;
+                return false;
+            }
+            
+            // 检查登录检查频率
+            if (now - this._globalState.lastLoginCheck < 30000) {
+                console.log(`⏳ 全局状态：登录检查过于频繁，实例 ${instanceId} 跳过检查`);
+                this._isProcessing = false;
+                return false;
+            }
+            
+            // 原子性操作：先设置状态，再添加实例
+            this._globalState.isReopening = true;
+            this._globalState.lastReopenTime = now;
+            this._globalState.reopenCount++;
+            this._globalState.lastLoginCheck = now;
+            
+            // 再次检查：确保在设置状态期间没有其他实例启动
+            if (this._globalState.activeInstances.size > 0) {
+                console.log(`⚠️ 全局状态：实例 ${instanceId} 在设置状态时发现其他实例，回滚状态`);
+                this._globalState.isReopening = false;
+                this._globalState.reopenCount--;
+                this._isProcessing = false;
+                return false;
+            }
+            
+            // 添加实例到活跃列表
+            this._globalState.activeInstances.add(instanceId);
+            
+            console.log(`🔄 全局状态：实例 ${instanceId} 开始处理登录，当前活跃实例: ${this._globalState.activeInstances.size}`);
+            console.log(`📊 全局状态详情：重试次数=${this._globalState.reopenCount}, 最后检查=${new Date(this._globalState.lastLoginCheck).toLocaleTimeString()}`);
+            return true;
+        } finally {
+            // 释放处理锁
+            this._isProcessing = false;
         }
-        
-        // 原子性操作：先设置状态，再添加实例
-        this._globalState.isReopening = true;
-        this._globalState.lastReopenTime = now;
-        this._globalState.reopenCount++;
-        this._globalState.lastLoginCheck = now;
-        
-        // 再次检查：确保在设置状态期间没有其他实例启动
-        if (this._globalState.activeInstances.size > 0) {
-            console.log(`⚠️ 全局状态：实例 ${instanceId} 在设置状态时发现其他实例，回滚状态`);
-            this._globalState.isReopening = false;
-            this._globalState.reopenCount--;
-            return false;
-        }
-        
-        // 添加实例到活跃列表
-        this._globalState.activeInstances.add(instanceId);
-        
-        console.log(`🔄 全局状态：实例 ${instanceId} 开始处理登录，当前活跃实例: ${this._globalState.activeInstances.size}`);
-        console.log(`📊 全局状态详情：重试次数=${this._globalState.reopenCount}, 最后检查=${new Date(this._globalState.lastLoginCheck).toLocaleTimeString()}`);
-        return true;
     }
 
     /**
@@ -107,11 +150,15 @@ class GlobalLoginManager {
         this._globalState.activeInstances.delete(instanceId);
         
         if (success) {
-            // 登录成功，重置所有状态
+            // 登录成功，重置所有状态并设置登录冷却期
             this._globalState.isReopening = false;
             this._globalState.reopenCount = 0;
             this._globalState.lastReopenTime = 0;
-            console.log(`✅ 全局状态：实例 ${instanceId} 登录成功，重置全局状态`);
+            
+            // 设置登录冷却期，防止立即重新检测
+            this.setLoginCooldown(300000); // 5分钟冷却期
+            
+            console.log(`✅ 全局状态：实例 ${instanceId} 登录成功，重置全局状态并设置冷却期`);
             console.log(`🔄 全局状态：所有实例现在可以重新尝试登录`);
         } else {
             // 登录失败，保持重新打开状态但清理活跃实例
@@ -128,6 +175,25 @@ class GlobalLoginManager {
     }
 
     /**
+     * 设置登录冷却期
+     * @param {number} duration - 冷却期持续时间（毫秒）
+     */
+    setLoginCooldown(duration) {
+        this._globalState.loginCooldown = true;
+        this._globalState.loginCooldownEnd = Date.now() + duration;
+        console.log(`🕐 设置登录冷却期: ${duration / 1000}秒`);
+    }
+    
+    /**
+     * 清除登录冷却期
+     */
+    clearLoginCooldown() {
+        this._globalState.loginCooldown = false;
+        this._globalState.loginCooldownEnd = 0;
+        console.log(`🕐 清除登录冷却期`);
+    }
+
+    /**
      * 检查全局登录状态
      * @returns {Object} 全局状态信息
      */
@@ -137,7 +203,9 @@ class GlobalLoginManager {
             lastReopenTime: this._globalState.lastReopenTime,
             reopenCount: this._globalState.reopenCount,
             activeInstances: Array.from(this._globalState.activeInstances),
-            lastLoginCheck: this._globalState.lastLoginCheck
+            lastLoginCheck: this._globalState.lastLoginCheck,
+            loginCooldown: this._globalState.loginCooldown,
+            loginCooldownEnd: this._globalState.loginCooldownEnd
         };
     }
 
@@ -191,9 +259,12 @@ class GlobalLoginManager {
             lastReopenTime: 0,
             reopenCount: 0,
             activeInstances: new Set(),
-            lastLoginCheck: 0
+            lastLoginCheck: 0,
+            loginCooldown: false,
+            loginCooldownEnd: 0
         };
         this._logCache.clear();
+        this._isProcessing = false;
         console.log('🔄 全局登录状态已重置');
     }
 
@@ -215,9 +286,12 @@ class GlobalLoginManager {
             lastReopenTime: 0,
             reopenCount: 0,
             activeInstances: new Set(),
-            lastLoginCheck: 0
+            lastLoginCheck: 0,
+            loginCooldown: false,
+            loginCooldownEnd: 0
         };
         this._logCache.clear();
+        this._isProcessing = false;
         console.log('🔄 全局状态已强制重置（解决死锁）');
     }
 
