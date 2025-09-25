@@ -1,18 +1,13 @@
 {
   "restaurants": [
     {
-      "name": "广仔阿福鸡煲(合生汇店)",
-      "location": "北京九龙山",
+      "name": "子午路张记·肉夹馍(北京首店)",
+      "location": "北京 朝阳公园",
       "maxImages": 10
     },
     {
-      "name": "便宜坊",
-      "location": "北京朝阳公园店",
-      "maxImages": 10
-    },
-    {
-      "name": "北新桥红焖羊肉·火锅·烧烤(团结湖店)",
-      "location": "朝阳公园/团结湖",
+      "name": "佟爷·老北京炙子烤肉(团结湖店)",
+      "location": "北京团结湖",
       "maxImages": 10
     }
   ],

@@ -120,8 +120,13 @@ class Logger {
             } catch (error) {
                 // 如果终端输出失败（如EPIPE错误），静默处理
                 // 避免在日志记录过程中产生新的错误
-                if (error.code !== 'EPIPE') {
-                    console.error('Logger terminal output error:', error.message);
+                if (error.code !== 'EPIPE' && error.code !== 'ECONNRESET') {
+                    // 只在非管道错误时记录错误，避免无限循环
+                    try {
+                        console.error('Logger terminal output error:', error.message);
+                    } catch (logError) {
+                        // 如果连错误日志都失败了，完全静默处理
+                    }
                 }
             }
         }

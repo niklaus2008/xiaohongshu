@@ -17,6 +17,7 @@ const { chromium } = require('playwright');
 const { BatchProcessor } = require('./batch-processor');
 const { getLogger } = require('./logger');
 const CookieValidator = require('./cookie-validator');
+const globalBrowserManager = require('./global-browser-manager');
 
 class WebInterface {
     
@@ -130,11 +131,14 @@ class WebInterface {
         // Cookie验证器实例
         this.cookieValidator = new CookieValidator();
         
-        // 浏览器实例管理
+        // 浏览器实例管理 - 使用全局浏览器管理器
         this.browserInstance = null;
         this.browserPage = null;
         this.isBrowserInitialized = false;
         this.isLoginWindowOpen = false;
+        
+        // 全局浏览器管理器
+        this.globalBrowserManager = globalBrowserManager;
         
         // 设置中间件
         this.setupMiddleware();
@@ -812,32 +816,78 @@ class WebInterface {
             this.logger.sendServiceLog(`正在使用Chromium浏览器打开: ${url}`, 'info');
             
             // 使用Playwright启动Chromium浏览器
-            const browser = await chromium.launch({
-                headless: false, // 显示浏览器窗口
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--no-first-run',
-                    '--no-zygote',
-                    '--disable-gpu'
-                ]
-            });
+            // 设置用户数据目录，确保Cookie和缓存持久化
+            const path = require('path');
+            const userDataDir = path.join(process.cwd(), 'browser-data');
             
-            // 创建新页面并导航到指定URL
-            const page = await browser.newPage();
-            await page.goto(url, { 
-                waitUntil: 'networkidle',
-                timeout: 30000 
-            });
-            
-            // 保存浏览器实例，以便后续使用
-            this.browserInstance = browser;
-            this.browserPage = page;
-            
-            console.log(`✅ Chromium浏览器已打开: ${url}`);
-            this.logger.sendSuccessLog(`Chromium浏览器已打开: ${url}`);
+            try {
+                // 使用launchPersistentContext来支持用户数据目录
+                const context = await chromium.launchPersistentContext(userDataDir, {
+                    headless: false, // 显示浏览器窗口
+                    args: [
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-accelerated-2d-canvas',
+                        '--no-first-run',
+                        '--no-zygote',
+                        '--disable-gpu'
+                    ]
+                });
+                
+                // 从持久化上下文中获取浏览器实例
+                const browser = context.browser();
+                
+                // 使用持久化上下文创建新页面并导航到指定URL
+                const page = await context.newPage();
+                await page.goto(url, { 
+                    waitUntil: 'networkidle',
+                    timeout: 30000 
+                });
+                
+                // 保存浏览器实例，以便后续使用
+                this.browserInstance = browser;
+                this.browserPage = page;
+                
+                console.log(`✅ Chromium浏览器已打开: ${url}`);
+                this.logger.sendSuccessLog(`Chromium浏览器已打开: ${url}`);
+                
+            } catch (error) {
+                if (error.message.includes('ProcessSingleton') || error.message.includes('profile is already in use')) {
+                    console.log('⚠️ 用户数据目录被占用，回退到普通模式...');
+                    this.logger.sendWarningLog('用户数据目录被占用，回退到普通模式');
+                    
+                    // 回退到普通启动模式
+                    const browser = await chromium.launch({
+                        headless: false, // 显示浏览器窗口
+                        args: [
+                            '--no-sandbox',
+                            '--disable-setuid-sandbox',
+                            '--disable-dev-shm-usage',
+                            '--disable-accelerated-2d-canvas',
+                            '--no-first-run',
+                            '--no-zygote',
+                            '--disable-gpu'
+                        ]
+                    });
+                    
+                    // 创建新页面并导航到指定URL
+                    const page = await browser.newPage();
+                    await page.goto(url, { 
+                        waitUntil: 'networkidle',
+                        timeout: 30000 
+                    });
+                    
+                    // 保存浏览器实例，以便后续使用
+                    this.browserInstance = browser;
+                    this.browserPage = page;
+                    
+                    console.log(`✅ Chromium浏览器已打开: ${url}`);
+                    this.logger.sendSuccessLog(`Chromium浏览器已打开: ${url}`);
+                } else {
+                    throw error;
+                }
+            }
             
         } catch (error) {
             console.log(`⚠️ 使用Chromium打开浏览器失败: ${error.message}`);
@@ -1044,59 +1094,41 @@ class WebInterface {
             let browserSource = 'unknown';
             let isUserBrowser = false;
             
-            // 检查是否有现有的浏览器实例
-            if (!this.browserInstance || !this.isBrowserInitialized) {
-                console.log('🔧 尝试连接到用户当前浏览器...');
-                this.logger.sendServiceLog('尝试连接到用户当前浏览器', 'info');
-                
-                // 尝试连接到用户当前浏览器
-                this.browserInstance = await this.connectToUserBrowser();
-                
-                if (!this.browserInstance) {
-                    console.log('🔧 无法连接到用户浏览器，创建新的浏览器实例...');
-                    this.logger.sendServiceLog('无法连接到用户浏览器，创建新的浏览器实例', 'warning');
-                    
-                    // 创建新的浏览器实例（强制显示模式）
-                    const { XiaohongshuScraper } = require('./xiaohongshu-scraper');
-                    const scraper = new XiaohongshuScraper({
-                        headless: false, // 强制显示浏览器窗口
-                        browserType: 'chromium', // 使用Chromium浏览器
-                        login: {
-                            method: 'manual',
-                            autoLogin: true,
-                            saveCookies: true,
-                            cookieFile: './cookies.json'
-                        }
-                    });
-                    
-                    // 设置Web接口实例，用于前端状态同步
-                    scraper.setWebInterface(this);
-                    
-                    // 初始化浏览器
-                    await scraper.initBrowser();
-                    this.browserInstance = scraper.browser;
-                    this.isBrowserInitialized = true;
-                    browserSource = 'new_instance';
-                    
-                    console.log('✅ 浏览器实例创建成功');
-                    this.logger.sendServiceLog('浏览器实例创建成功', 'success');
-                } else {
-                    console.log('✅ 成功连接到用户当前浏览器');
-                    this.logger.sendServiceLog('成功连接到用户当前浏览器', 'success');
-                    this.isBrowserInitialized = true;
-                    browserSource = 'user_browser';
-                    isUserBrowser = true;
+            // 使用全局浏览器管理器获取浏览器实例
+            console.log('🔧 使用全局浏览器管理器获取浏览器实例...');
+            this.logger.sendServiceLog('使用全局浏览器管理器获取浏览器实例', 'info');
+            
+            const browserInfo = await this.globalBrowserManager.getBrowserInstance();
+            this.browserInstance = browserInfo.browser;
+            this.browserPage = browserInfo.page;
+            this.isBrowserInitialized = browserInfo.isInitialized;
+            browserSource = 'global_browser_manager';
+            
+            console.log('✅ 已获取全局浏览器实例');
+            this.logger.sendServiceLog('已获取全局浏览器实例', 'success');
+            
+            // 检查是否已有页面实例，避免创建新窗口
+            if (this.browserPage) {
+                try {
+                    await this.browserPage.evaluate(() => document.title);
+                    console.log('✅ 使用现有页面实例，避免创建新窗口');
+                } catch (error) {
+                    console.log('⚠️ 现有页面实例无效，创建新页面');
+                    this.browserPage = null;
                 }
-            } else {
-                console.log('♻️ 复用现有浏览器实例');
-                this.logger.sendServiceLog('复用现有浏览器实例', 'info');
-                browserSource = 'existing_instance';
             }
             
-            // 创建新页面并打开指定URL
+            // 创建新页面并打开指定URL（仅在必要时）
+            if (!this.browserPage) {
+                try {
+                    this.browserPage = await this.browserInstance.newPage();
+                } catch (error) {
+                    console.log(`⚠️ 创建新页面失败: ${error.message}`);
+                    throw error;
+                }
+            }
+            
             try {
-                this.browserPage = await this.browserInstance.newPage();
-                
                 // 强制将页面置于前台，确保用户能看到
                 await this.browserPage.bringToFront();
                 console.log('👁️ 已将登录页面置于前台');
@@ -1217,6 +1249,18 @@ class WebInterface {
                 error: error.message
             });
         }
+    }
+
+    /**
+     * 获取浏览器实例（供其他组件复用）
+     * @returns {Object} 浏览器实例信息
+     */
+    getBrowserInstance() {
+        return {
+            browser: this.browserInstance,
+            page: this.browserPage,
+            isInitialized: this.isBrowserInitialized
+        };
     }
 
     /**

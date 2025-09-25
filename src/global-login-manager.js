@@ -30,21 +30,27 @@ class GlobalLoginManager {
     canStartLoginProcess(instanceId) {
         const now = Date.now();
         
-        // 检查是否正在重新打开登录页面
-        if (this._globalState.isReopening && now - this._globalState.lastReopenTime < 30000) {
-            console.log(`⏳ 全局状态：正在重新打开登录页面，实例 ${instanceId} 等待中...`);
+        // 检查是否已经有活跃实例在处理登录
+        if (this._globalState.activeInstances.size > 0) {
+            console.log(`⏳ 全局状态：已有实例正在处理登录，实例 ${instanceId} 等待中... (活跃实例: ${this._globalState.activeInstances.size})`);
             return false;
         }
         
-        // 检查重新打开次数（放宽限制，允许更多重试）
-        if (this._globalState.reopenCount >= 10) {
-            console.log(`⚠️ 全局状态：重新打开登录页面次数过多，实例 ${instanceId} 跳过处理`);
+        // 检查是否正在重新打开登录页面（延长等待时间）
+        if (this._globalState.isReopening && now - this._globalState.lastReopenTime < 60000) {
+            console.log(`⏳ 全局状态：正在重新打开登录页面，实例 ${instanceId} 等待中... (剩余时间: ${Math.ceil((60000 - (now - this._globalState.lastReopenTime)) / 1000)}秒)`);
             return false;
         }
         
-        // 检查登录检查频率
-        if (now - this._globalState.lastLoginCheck < 5000) {
-            console.log(`⏳ 全局状态：登录检查过于频繁，实例 ${instanceId} 跳过检查`);
+        // 检查重新打开次数（降低限制，防止过度重试）
+        if (this._globalState.reopenCount >= 5) {
+            console.log(`⚠️ 全局状态：重新打开登录页面次数过多，实例 ${instanceId} 跳过处理 (重试次数: ${this._globalState.reopenCount})`);
+            return false;
+        }
+        
+        // 检查登录检查频率（增加间隔时间）
+        if (now - this._globalState.lastLoginCheck < 10000) {
+            console.log(`⏳ 全局状态：登录检查过于频繁，实例 ${instanceId} 跳过检查 (剩余时间: ${Math.ceil((10000 - (now - this._globalState.lastLoginCheck)) / 1000)}秒)`);
             return false;
         }
         
@@ -62,13 +68,32 @@ class GlobalLoginManager {
         }
         
         const now = Date.now();
+        
+        // 三重检查：确保没有其他实例正在处理（防止竞态条件）
+        if (this._globalState.activeInstances.size > 0) {
+            console.log(`⚠️ 全局状态：实例 ${instanceId} 启动时发现其他实例正在处理，拒绝启动`);
+            return false;
+        }
+        
+        // 原子性操作：先设置状态，再添加实例
         this._globalState.isReopening = true;
         this._globalState.lastReopenTime = now;
         this._globalState.reopenCount++;
         this._globalState.lastLoginCheck = now;
+        
+        // 再次检查：确保在设置状态期间没有其他实例启动
+        if (this._globalState.activeInstances.size > 0) {
+            console.log(`⚠️ 全局状态：实例 ${instanceId} 在设置状态时发现其他实例，回滚状态`);
+            this._globalState.isReopening = false;
+            this._globalState.reopenCount--;
+            return false;
+        }
+        
+        // 添加实例到活跃列表
         this._globalState.activeInstances.add(instanceId);
         
         console.log(`🔄 全局状态：实例 ${instanceId} 开始处理登录，当前活跃实例: ${this._globalState.activeInstances.size}`);
+        console.log(`📊 全局状态详情：重试次数=${this._globalState.reopenCount}, 最后检查=${new Date(this._globalState.lastLoginCheck).toLocaleTimeString()}`);
         return true;
     }
 
@@ -78,19 +103,28 @@ class GlobalLoginManager {
      * @param {boolean} success - 是否成功
      */
     finishLoginProcess(instanceId, success) {
+        // 确保实例被正确移除
         this._globalState.activeInstances.delete(instanceId);
         
         if (success) {
             // 登录成功，重置所有状态
             this._globalState.isReopening = false;
             this._globalState.reopenCount = 0;
+            this._globalState.lastReopenTime = 0;
             console.log(`✅ 全局状态：实例 ${instanceId} 登录成功，重置全局状态`);
+            console.log(`🔄 全局状态：所有实例现在可以重新尝试登录`);
         } else {
-            // 登录失败，保持重新打开状态
+            // 登录失败，保持重新打开状态但清理活跃实例
             console.log(`❌ 全局状态：实例 ${instanceId} 登录失败，保持重新打开状态`);
         }
         
         console.log(`📊 全局状态：当前活跃实例: ${this._globalState.activeInstances.size}`);
+        
+        // 如果所有实例都完成了，重置重新打开状态
+        if (this._globalState.activeInstances.size === 0) {
+            console.log(`🔄 全局状态：所有实例已完成，重置重新打开状态`);
+            this._globalState.isReopening = false;
+        }
     }
 
     /**
@@ -170,6 +204,37 @@ class GlobalLoginManager {
         this._globalState.reopenCount = 0;
         this._globalState.isReopening = false;
         console.log('🔄 重新打开计数已重置');
+    }
+
+    /**
+     * 强制重置全局状态（用于解决死锁问题）
+     */
+    forceReset() {
+        this._globalState = {
+            isReopening: false,
+            lastReopenTime: 0,
+            reopenCount: 0,
+            activeInstances: new Set(),
+            lastLoginCheck: 0
+        };
+        this._logCache.clear();
+        console.log('🔄 全局状态已强制重置（解决死锁）');
+    }
+
+    /**
+     * 检查并清理僵尸实例（超过5分钟未完成的实例）
+     */
+    cleanupZombieInstances() {
+        const now = Date.now();
+        const timeout = 5 * 60 * 1000; // 5分钟超时
+        
+        if (this._globalState.isReopening && now - this._globalState.lastReopenTime > timeout) {
+            console.log('🧹 检测到僵尸实例，强制清理全局状态');
+            this.forceReset();
+            return true;
+        }
+        
+        return false;
     }
 }
 

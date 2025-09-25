@@ -147,29 +147,57 @@ class BatchProcessor {
             this.emitPreLoginStatus(true, 10);
             this.log('🔧 创建登录实例...', 'info');
             
-            // 创建一个专门的登录实例
-            const { XiaohongshuScraper } = require('./xiaohongshu-scraper');
-            const loginScraper = new XiaohongshuScraper({
-                headless: false, // 显示浏览器窗口，让用户看到登录过程
-                browserType: 'chromium',
-                login: {
-                    method: 'manual',
-                    autoLogin: true,
-                    saveCookies: true,
-                    cookieFile: './cookies.json'
+            // 优先使用WebInterface的浏览器实例，避免重复创建
+            let loginScraper;
+            const browserInfo = this.webInterface ? this.webInterface.getBrowserInstance() : null;
+            if (browserInfo && browserInfo.browser && browserInfo.isInitialized) {
+                this.log('♻️ 复用WebInterface的浏览器实例...', 'info');
+                
+                // 使用WebInterface的浏览器实例创建爬虫
+                loginScraper = new XiaohongshuScraper({
+                    headless: false,
+                    browserType: 'chromium',
+                    login: {
+                        method: 'manual',
+                        autoLogin: true,
+                        saveCookies: true,
+                        cookieFile: './cookies.json'
+                    }
+                });
+                
+                // 直接使用WebInterface的浏览器实例
+                loginScraper.browser = browserInfo.browser;
+                loginScraper.page = browserInfo.page;
+                loginScraper.isBrowserInitialized = true;
+                
+                this.log('✅ 已复用WebInterface的浏览器实例', 'success');
+            } else {
+                this.log('🔧 创建新的登录实例...', 'info');
+                
+                // 创建新的登录实例
+                const { XiaohongshuScraper } = require('./xiaohongshu-scraper');
+                loginScraper = new XiaohongshuScraper({
+                    headless: false, // 显示浏览器窗口，让用户看到登录过程
+                    browserType: 'chromium',
+                    login: {
+                        method: 'manual',
+                        autoLogin: true,
+                        saveCookies: true,
+                        cookieFile: './cookies.json'
+                    }
+                });
+                
+                // 设置Web接口实例，用于前端状态同步
+                if (this.webInterface) {
+                    loginScraper.setWebInterface(this.webInterface);
                 }
-            });
-            
-            // 设置Web接口实例，用于前端状态同步
-            if (this.webInterface) {
-                loginScraper.setWebInterface(this.webInterface);
+                
+                // 发送预登录进度更新
+                this.emitPreLoginStatus(true, 30);
+                this.log('🚀 初始化浏览器...', 'info');
+                // 初始化浏览器
+                await loginScraper.initBrowser();
             }
-            
-            // 发送预登录进度更新
-            this.emitPreLoginStatus(true, 30);
-            this.log('🚀 初始化浏览器...', 'info');
-            // 初始化浏览器
-            await loginScraper.initBrowser();
             
             // 发送预登录进度更新
             this.emitPreLoginStatus(true, 60);
@@ -391,6 +419,10 @@ class BatchProcessor {
                 }
             });
             
+            // 为每个爬虫实例设置唯一的实例ID，避免状态混乱
+            scraper.instanceId = `scraper_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            this.log(`🆔 爬虫实例ID: ${scraper.instanceId}`, 'info');
+            
             // 设置Web接口实例，用于前端状态同步
             if (this.webInterface) {
                 scraper.setWebInterface(this.webInterface);
@@ -400,6 +432,15 @@ class BatchProcessor {
             if (this.sharedLoginState) {
                 scraper.setSharedLoginState(this.sharedLoginState);
                 this.log(`🔄 为餐馆 "${restaurant.name}" 设置共享登录状态`, 'info');
+                
+                // 为每个爬虫实例创建独立的页面，避免状态混乱
+                try {
+                    const newPage = await scraper.browser.newPage();
+                    scraper.page = newPage;
+                    this.log(`🆕 为餐馆 "${restaurant.name}" 创建独立页面`, 'info');
+                } catch (error) {
+                    this.log(`⚠️ 创建独立页面失败: ${error.message}`, 'warning');
+                }
             }
             
             task.scraper = scraper;
