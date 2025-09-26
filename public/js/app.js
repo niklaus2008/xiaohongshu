@@ -353,11 +353,17 @@ class XiaohongshuDownloaderApp {
                 
                 // 验证每个餐馆数据的完整性
                 const validRestaurants = importedRestaurants.filter(restaurant => {
-                    return restaurant && 
-                           typeof restaurant.name === 'string' && 
-                           restaurant.name.trim() !== '' &&
-                           typeof restaurant.location === 'string' && 
-                           restaurant.location.trim() !== '';
+                    if (!restaurant || typeof restaurant.name !== 'string' || typeof restaurant.location !== 'string') {
+                        return false;
+                    }
+                    
+                    // 更彻底的字符串清理：清理所有类型的空白字符
+                    const cleanName = restaurant.name.replace(/[\r\n\t\s]+/g, ' ').trim();
+                    const cleanLocation = restaurant.location.replace(/[\r\n\t\s]+/g, ' ').trim();
+                    
+                    this.addLog(`验证餐馆数据：名称="${cleanName}", 地点="${cleanLocation}"`, 'debug');
+                    
+                    return cleanName !== '' && cleanLocation !== '';
                 });
                 
                 if (validRestaurants.length === 0) {
@@ -375,9 +381,15 @@ class XiaohongshuDownloaderApp {
                     this.addLog('已清空之前的任务', 'info');
                 }
                 
-                // 添加新导入的餐馆
-                this.restaurants.push(...validRestaurants);
-                this.addLog(`成功导入 ${validRestaurants.length} 个餐馆`, 'success');
+                // 清理并添加新导入的餐馆
+                const cleanedRestaurants = validRestaurants.map(restaurant => ({
+                    name: restaurant.name.replace(/[\r\n\t\s]+/g, ' ').trim(),
+                    location: restaurant.location.replace(/[\r\n\t\s]+/g, ' ').trim(),
+                    maxImages: restaurant.maxImages || 10
+                }));
+                
+                this.restaurants.push(...cleanedRestaurants);
+                this.addLog(`成功导入 ${cleanedRestaurants.length} 个餐馆`, 'success');
                 this.updateRestaurantsList();
                 this.updateUI();
                 
@@ -406,7 +418,7 @@ class XiaohongshuDownloaderApp {
             if (char === '"') {
                 inQuotes = !inQuotes;
             } else if (char === ',' && !inQuotes) {
-                result.push(current.trim());
+                result.push(current);
                 current = '';
             } else {
                 current += char;
@@ -414,10 +426,16 @@ class XiaohongshuDownloaderApp {
         }
         
         // 添加最后一个字段
-        result.push(current.trim());
+        result.push(current);
         
-        // 移除字段两端的引号
-        return result.map(field => field.replace(/^"|"$/g, ''));
+        // 清理每个字段：移除引号并清理所有空白字符
+        return result.map(field => {
+            // 移除字段两端的引号
+            let cleaned = field.replace(/^"|"$/g, '');
+            // 清理所有类型的空白字符（包括换行符、制表符、回车符等）
+            cleaned = cleaned.replace(/[\r\n\t\s]+/g, ' ').trim();
+            return cleaned;
+        });
     }
 
     /**
@@ -426,16 +444,26 @@ class XiaohongshuDownloaderApp {
      * @returns {Array} 餐馆数组
      */
     parseCSV(content) {
-        const lines = content.split('\n').filter(line => line.trim());
+        // 先清理内容，处理跨行数据
+        const cleanedContent = this.cleanCSVContent(content);
+        
+        // 处理多种换行符格式（\r\n, \n, \r）
+        const lines = cleanedContent.split(/\r?\n|\r/).filter(line => line.trim());
         const restaurants = [];
         const errors = [];
         
+        this.addLog(`开始解析CSV文件，共${lines.length}行数据`, 'info');
+        
         for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
+            const line = lines[i];
+            if (!line.trim()) continue;
+            
+            this.addLog(`解析第${i + 1}行：${line}`, 'debug');
             
             // 改进的CSV解析，正确处理引号内的逗号
             const parts = this.parseCSVLine(line);
+            
+            this.addLog(`解析结果：${JSON.stringify(parts)}`, 'debug');
             
             if (parts.length < 2) {
                 errors.push(`第${i + 1}行格式不正确：缺少地点信息。正确格式：餐馆名称,地点,下载的图片数(可选)`);
@@ -447,11 +475,14 @@ class XiaohongshuDownloaderApp {
                 continue;
             }
             
-            restaurants.push({
+            const restaurant = {
                 name: parts[0],
                 location: parts[1],
                 maxImages: parseInt(parts[2]) || 10
-            });
+            };
+            
+            this.addLog(`成功解析餐馆：${restaurant.name} - ${restaurant.location}`, 'success');
+            restaurants.push(restaurant);
         }
         
         // 如果有错误，显示警告信息
@@ -459,7 +490,51 @@ class XiaohongshuDownloaderApp {
             this.addLog(`CSV解析警告：${errors.join('; ')}`, 'warning');
         }
         
+        this.addLog(`CSV解析完成，成功解析${restaurants.length}个餐馆`, 'info');
         return restaurants;
+    }
+
+    /**
+     * 清理CSV内容，处理跨行数据
+     * @param {string} content - 原始CSV内容
+     * @returns {string} 清理后的CSV内容
+     */
+    cleanCSVContent(content) {
+        // 将跨行的数据合并为单行
+        // 如果一行不以逗号结尾，说明数据跨行了，需要合并到下一行
+        const lines = content.split(/\r?\n|\r/);
+        const mergedLines = [];
+        let currentLine = '';
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            
+            currentLine += line;
+            
+            // 检查是否是一行完整的数据（以数字结尾，表示有图片数量）
+            // 或者以地点信息结尾（不包含逗号，说明是最后一部分）
+            if (currentLine.match(/,\d+\s*$/) || 
+                (currentLine.split(',').length >= 2 && !currentLine.endsWith(','))) {
+                mergedLines.push(currentLine);
+                currentLine = '';
+            } else {
+                // 如果数据不完整，继续合并到下一行
+                currentLine += ' ';
+            }
+        }
+        
+        // 处理最后一行
+        if (currentLine.trim()) {
+            mergedLines.push(currentLine);
+        }
+        
+        this.addLog(`CSV内容清理：${lines.length}行 -> ${mergedLines.length}行`, 'debug');
+        mergedLines.forEach((line, index) => {
+            this.addLog(`合并后第${index + 1}行：${line}`, 'debug');
+        });
+        
+        return mergedLines.join('\n');
     }
 
     /**
