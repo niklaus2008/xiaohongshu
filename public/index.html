@@ -409,13 +409,13 @@
     <script>
         // 页面加载时自动检测登录状态
         document.addEventListener('DOMContentLoaded', function() {
-            // 延迟执行，确保所有组件都已加载
+            // 减少延迟时间，加快响应速度
             setTimeout(() => {
                 if (window.app && window.app.autoDetectLoginStatus) {
                     console.log('🔍 页面加载完成，开始自动检测登录状态...');
                     window.app.autoDetectLoginStatus();
                 }
-            }, 1000);
+            }, 500); // 从1000ms减少到500ms
         });
     </script>
 </body>

@@ -37,10 +37,42 @@ class XiaohongshuDownloaderApp {
     init() {
         this.initSocket();
         this.bindEvents();
-        this.loadConfig();
-        this.checkLoginStatus();
         this.initCrossWindowLoginDetection();
+        
+        // 并行执行异步操作，避免串行等待
+        this.initializeAsync();
+        
+        // 立即更新UI，不等待异步操作
         this.updateUI();
+    }
+
+    /**
+     * 并行初始化异步操作
+     */
+    async initializeAsync() {
+        try {
+            // 并行执行配置加载和登录状态检查
+            const [configResult, loginResult] = await Promise.allSettled([
+                this.loadConfig(),
+                this.checkLoginStatus()
+            ]);
+            
+            // 处理结果
+            if (configResult.status === 'rejected') {
+                console.warn('配置加载失败:', configResult.reason);
+            }
+            
+            if (loginResult.status === 'rejected') {
+                console.warn('登录状态检查失败:', loginResult.reason);
+            }
+            
+            // 更新UI状态
+            this.updateUI();
+            
+        } catch (error) {
+            console.error('异步初始化失败:', error);
+            this.addLog('初始化过程中出现错误，但应用仍可正常使用', 'warning');
+        }
     }
 
     /**
@@ -709,11 +741,14 @@ class XiaohongshuDownloaderApp {
                 }
                 
                 this.addLog('配置已加载', 'success');
+                // 配置加载完成后立即更新UI
                 this.updateUI();
             }
             
         } catch (error) {
             console.log('加载配置失败:', error);
+            // 即使配置加载失败，也不影响应用正常使用
+            this.addLog('配置加载失败，使用默认配置', 'warning');
         }
     }
 
@@ -1503,31 +1538,55 @@ class XiaohongshuDownloaderApp {
         const startBtn = document.getElementById('startBtn');
         const hasRestaurants = this.restaurants.length > 0;
         
-        // 检查登录状态
-        fetch('/api/login/status')
-            .then(response => response.json())
-            .then(result => {
-                if (result.success && result.data.isLoggedIn && result.data.loginScore > 0 && hasRestaurants) {
+        // 先启用按钮的基本功能，不等待API响应
+        if (hasRestaurants) {
+            startBtn.disabled = false;
+            startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载';
+        } else {
+            startBtn.disabled = true;
+            startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (请先添加餐馆)';
+        }
+        
+        // 异步检查登录状态，不阻塞UI
+        this.checkLoginStatusAsync().then(result => {
+            if (result && result.success && result.data.isLoggedIn && result.data.loginScore > 0) {
+                // 登录状态正常，保持按钮启用
+                if (hasRestaurants) {
                     startBtn.disabled = false;
                     startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载';
-                } else {
-                    startBtn.disabled = true;
-                    if (!hasRestaurants) {
-                        startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (请先添加餐馆)';
-                    } else if (!result.data.isLoggedIn) {
-                        startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (请先登录)';
-                    } else if (result.data.loginScore <= 0) {
-                        startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (登录状态评分过低)';
-                    } else {
-                        startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载';
-                    }
                 }
-            })
-            .catch(error => {
-                console.error('检查登录状态失败:', error);
+            } else {
+                // 登录状态异常，禁用按钮
                 startBtn.disabled = true;
-                startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (状态检查失败)';
-            });
+                if (!hasRestaurants) {
+                    startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (请先添加餐馆)';
+                } else if (!result || !result.data.isLoggedIn) {
+                    startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (请先登录)';
+                } else if (result.data.loginScore <= 0) {
+                    startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (登录状态评分过低)';
+                }
+            }
+        }).catch(error => {
+            console.error('检查登录状态失败:', error);
+            // 即使检查失败，如果已有餐馆配置，仍然允许用户尝试
+            if (hasRestaurants) {
+                startBtn.disabled = false;
+                startBtn.innerHTML = '<i class="fas fa-play me-2"></i>开始下载 (状态检查失败，可尝试)';
+            }
+        });
+    }
+
+    /**
+     * 异步检查登录状态
+     */
+    async checkLoginStatusAsync() {
+        try {
+            const response = await fetch('/api/login/status');
+            return await response.json();
+        } catch (error) {
+            console.error('检查登录状态失败:', error);
+            return null;
+        }
     }
 
     /**

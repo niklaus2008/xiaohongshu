@@ -11,6 +11,7 @@ body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     font-size: 16px; /* 增大基础字体大小 */
     line-height: 1.6; /* 增加行高提高可读性 */
+    zoom: 1.2; /* 整体放大20% */
 }
 
 /* 容器宽度优化 */
@@ -588,9 +589,6 @@ header p {
 }
 
 /* 页面初始显示优化 */
-body {
-    zoom: 1.4; /* 整体放大20% */
-}
 
 /* 确保页面内容在视窗中合理显示 */
 .container {
