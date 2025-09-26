@@ -257,12 +257,10 @@ class XiaohongshuDownloaderApp {
      */
     removeRestaurant(index) {
         const restaurant = this.restaurants[index];
-        if (confirm(`确定要删除餐馆 "${restaurant.name}" 吗？`)) {
-            this.restaurants.splice(index, 1);
-            this.addLog(`已删除餐馆: ${restaurant.name}`, 'info');
-            this.updateRestaurantsList();
-            this.updateUI();
-        }
+        this.restaurants.splice(index, 1);
+        this.addLog(`已删除餐馆: ${restaurant.name}`, 'info');
+        this.updateRestaurantsList();
+        this.updateUI();
     }
 
     /**
@@ -297,17 +295,20 @@ class XiaohongshuDownloaderApp {
                         </div>
                     </div>
                     <div class="restaurant-actions">
-                        <button class="btn btn-sm btn-outline-primary" onclick="app.showRestaurantModal(${index})">
+                        <button class="btn btn-sm btn-outline-primary" onclick="app.showRestaurantModal(${index})" title="编辑餐馆">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="btn btn-sm btn-outline-danger" onclick="app.removeRestaurant(${index})">
+                        <button class="btn btn-sm btn-outline-danger" onclick="app.removeRestaurant(${index})" title="删除餐馆" type="button">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
                 </div>
             </div>
         `).join('');
+        
+        console.log('🔄 餐馆列表已更新，当前餐馆数量:', this.restaurants.length);
     }
+
 
     /**
      * 切换导入区域显示

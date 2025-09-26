@@ -154,6 +154,35 @@ header {
 .restaurant-item .btn-sm {
     padding: 0.25rem 0.5rem;
     font-size: 0.75rem;
+    cursor: pointer;
+    pointer-events: auto;
+    user-select: none;
+}
+
+.restaurant-item .btn-sm:hover {
+    transform: scale(1.05);
+    transition: transform 0.2s ease;
+}
+
+.restaurant-item .btn-sm:active {
+    transform: scale(0.95);
+}
+
+/* 确保删除按钮可以点击 */
+.restaurant-item .btn-outline-danger {
+    border-color: #dc3545;
+    color: #dc3545;
+    background-color: transparent;
+}
+
+.restaurant-item .btn-outline-danger:hover {
+    background-color: #dc3545;
+    color: white;
+    border-color: #dc3545;
+}
+
+.restaurant-item .btn-outline-danger:focus {
+    box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25);
 }
 
 /* 日志容器样式 */
