@@ -89,6 +89,9 @@ class XiaohongshuScraper {
         
         // 共享登录状态
         this.sharedLoginState = null;
+        
+        // 登录验证标记（单实例模式优化）
+        this.isLoginVerified = false;
     }
 
     /**
@@ -119,15 +122,25 @@ class XiaohongshuScraper {
             try {
                 console.log('🔄 使用共享登录状态，跳过独立登录...');
                 
-                // 使用共享的浏览器实例
+                // 使用共享的浏览器实例，但创建独立的页面
                 this.browser = this.sharedLoginState.browser;
-                this.page = this.sharedLoginState.page;
+                
+                // 为每个爬虫实例创建独立的页面，避免页面状态冲突
+                console.log('📄 为当前爬虫实例创建独立页面...');
+                this.page = await this.browser.newPage();
                 
                 // 设置Cookie
                 if (this.sharedLoginState.cookies && this.sharedLoginState.cookies.length > 0) {
                     await this.page.context().addCookies(this.sharedLoginState.cookies);
                     console.log(`✅ 已设置 ${this.sharedLoginState.cookies.length} 个Cookie`);
                 }
+                
+                // 设置页面超时和User-Agent
+                this.page.setDefaultTimeout(this.config.timeout);
+                await this.page.setExtraHTTPHeaders({
+                    'User-Agent': this.config.userAgent
+                });
+                console.log('✅ 页面配置完成，使用共享登录状态');
                 
                 // 验证登录状态（避免网络冲突）
                 try {
@@ -380,24 +393,58 @@ class XiaohongshuScraper {
             // 构建搜索关键词
             const searchKeyword = `${restaurantName} ${location}`;
             this.log(`📝 搜索关键词: ${searchKeyword}`, 'info');
-            this.log(`📋 步骤 2/8: 正在检查登录状态...`, 'info');
-
-            // 优先尝试使用共享登录状态
-            let loginSuccess = false;
-            if (this.sharedLoginState) {
-                console.log(`📋 步骤 2/8: 尝试使用共享登录状态...`);
-                const loginStartTime = Date.now();
-                loginSuccess = await this.useSharedLoginState();
-                const loginTime = Date.now() - loginStartTime;
-                if (loginSuccess) {
-                    console.log(`✅ 步骤 2/8: 共享登录状态验证成功 (耗时: ${loginTime}ms)`);
-                } else {
-                    console.log(`⚠️ 步骤 2/8: 共享登录状态不可用 (耗时: ${loginTime}ms)`);
+            // 单实例模式优化：如果登录已验证，跳过登录检查
+            if (this.isLoginVerified) {
+                this.log(`🔐 登录状态已验证，跳过登录检查，直接进行搜索`, 'info');
+                console.log(`✅ 步骤 2/8: 登录状态已验证，跳过检查`);
+                
+                // 验证当前页面登录状态，确保可以搜索
+                try {
+                    const currentUrl = this.page.url();
+                    if (!currentUrl.includes('xiaohongshu.com')) {
+                        console.log('🔄 当前不在小红书页面，导航到小红书首页...');
+                        await this.page.goto('https://www.xiaohongshu.com/explore', { 
+                            waitUntil: 'domcontentloaded',
+                            timeout: 15000
+                        });
+                        await this.page.waitForTimeout(2000);
+                    }
+                    
+                    // 检查页面是否需要重新登录
+                    const needsLogin = await this.page.evaluate(() => {
+                        return document.body.innerText.includes('登录后查看') || 
+                               document.body.innerText.includes('扫码登录') ||
+                               document.body.innerText.includes('手机号登录');
+                    });
+                    
+                    if (needsLogin) {
+                        console.log('⚠️ 页面显示需要登录，重新验证登录状态...');
+                        this.isLoginVerified = false; // 重置登录状态
+                    } else {
+                        console.log('✅ 页面登录状态正常，可以继续搜索');
+                    }
+                } catch (error) {
+                    console.log(`⚠️ 验证登录状态时出错: ${error.message}`);
                 }
-            }
+            } else {
+                this.log(`📋 步骤 2/8: 正在检查登录状态...`, 'info');
+
+                // 优先尝试使用共享登录状态
+                let loginSuccess = false;
+                if (this.sharedLoginState) {
+                    console.log(`📋 步骤 2/8: 尝试使用共享登录状态...`);
+                    const loginStartTime = Date.now();
+                    loginSuccess = await this.useSharedLoginState();
+                    const loginTime = Date.now() - loginStartTime;
+                    if (loginSuccess) {
+                        console.log(`✅ 步骤 2/8: 共享登录状态验证成功 (耗时: ${loginTime}ms)`);
+                    } else {
+                        console.log(`⚠️ 步骤 2/8: 共享登录状态不可用 (耗时: ${loginTime}ms)`);
+                    }
+                }
             
-            // 如果共享登录不可用，初始化浏览器并进行独立登录
-            if (!loginSuccess) {
+                // 如果共享登录不可用，初始化浏览器并进行独立登录
+                if (!loginSuccess) {
                 console.log(`📋 步骤 3/8: 初始化浏览器进行独立登录...`);
                 const browserStartTime = Date.now();
                 await this.initBrowser();
@@ -480,7 +527,9 @@ class XiaohongshuScraper {
                 }
             }
             
-            console.log('✅ 登录验证成功，开始搜索操作...');
+                console.log('✅ 登录验证成功，开始搜索操作...');
+            }
+            
             console.log(`📋 步骤 4/8: 正在搜索 "${searchKeyword}"...`);
             const searchStartTime = Date.now();
             await this.performSearch(searchKeyword);
@@ -1569,7 +1618,42 @@ class XiaohongshuScraper {
             
             // 等待搜索结果加载
             console.log('⏳ 等待搜索结果加载...');
-            await this.page.waitForTimeout(5000);
+            await this.page.waitForTimeout(3000);
+            
+            // 检查是否跳转到搜索结果页面
+            const currentUrl = this.page.url();
+            console.log(`🌐 当前页面URL: ${currentUrl}`);
+            
+            // 如果没有跳转到搜索结果页面，尝试直接访问搜索结果URL
+            if (!currentUrl.includes('search_result') && !currentUrl.includes('search')) {
+                console.log('⚠️ 搜索后没有跳转到搜索结果页面，尝试直接访问搜索结果URL...');
+                const searchUrl = `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(keyword)}&type=51`;
+                console.log(`🌐 直接访问搜索结果URL: ${searchUrl}`);
+                
+                try {
+                    await this.page.goto(searchUrl, { 
+                        waitUntil: 'domcontentloaded',
+                        timeout: 30000
+                    });
+                    await this.page.waitForTimeout(3000);
+                    console.log('✅ 已跳转到搜索结果页面');
+                } catch (error) {
+                    console.log(`⚠️ 跳转到搜索结果页面失败: ${error.message}`);
+                }
+            }
+            
+            // 检查搜索结果页面状态
+            const searchResultInfo = await this.page.evaluate(() => {
+                return {
+                    url: window.location.href,
+                    title: document.title,
+                    hasSearchResults: document.querySelectorAll('.note-item, .feed-item, .content-item, .note-card, .search-item, .result-item, article, .card, .note, .feed').length,
+                    searchKeyword: document.querySelector('input[type="search"], input[placeholder*="搜索"]')?.value || '',
+                    bodyText: document.body ? document.body.innerText.substring(0, 300) : ''
+                };
+            });
+            
+            console.log(`📊 搜索结果页面状态:`, searchResultInfo);
             
             // 等待页面稳定
             console.log('⏳ 等待页面稳定...');
@@ -2331,9 +2415,36 @@ class XiaohongshuScraper {
             
             console.log(`📸 总共提取到 ${uniqueImages.length} 张图片`);
             
-            // 如果过滤后没有图片，尝试更宽松的过滤条件
+            // 如果过滤后没有图片，检查是否在正确的搜索结果页面
             if (uniqueImages.length === 0) {
-                console.log('⚠️ 过滤后没有图片，尝试更宽松的过滤条件...');
+                console.log('⚠️ 过滤后没有图片，检查搜索结果页面状态...');
+                
+                // 检查当前页面是否是搜索结果页面
+                const pageInfo = await this.page.evaluate(() => {
+                    return {
+                        url: window.location.href,
+                        title: document.title,
+                        hasSearchResults: document.querySelectorAll('.note-item, .feed-item, .content-item, .note-card, .search-item, .result-item, article, .card, .note, .feed').length > 0,
+                        isSearchPage: window.location.href.includes('search_result') || window.location.href.includes('search'),
+                        bodyText: document.body ? document.body.innerText.substring(0, 200) : ''
+                    };
+                });
+                
+                console.log(`📊 页面信息:`, pageInfo);
+                
+                if (!pageInfo.isSearchPage) {
+                    console.log('❌ 当前页面不是搜索结果页面，可能搜索失败');
+                    this.log('❌ 当前页面不是搜索结果页面，可能搜索失败', 'error');
+                    return [];
+                }
+                
+                if (!pageInfo.hasSearchResults) {
+                    console.log('❌ 搜索结果页面没有找到相关内容');
+                    this.log('❌ 搜索结果页面没有找到相关内容', 'warning');
+                    return [];
+                }
+                
+                console.log('⚠️ 搜索结果页面存在但图片提取失败，尝试更宽松的过滤条件...');
                 console.log('🔍 正在使用更宽松的过滤条件搜索图片...');
                 const allPageImages = await this.page.evaluate(() => {
                     const images = [];
@@ -2699,9 +2810,13 @@ class XiaohongshuScraper {
             const url = new URL(imageUrl);
             const pathname = url.pathname;
             const extension = path.extname(pathname) || '.jpg';
-            return `image_${index.toString().padStart(3, '0')}${extension}`;
+            
+            // 添加实例ID确保文件名唯一性
+            const instanceId = this.instanceId ? this.instanceId.split('_').pop() : 'unknown';
+            return `image_${index.toString().padStart(3, '0')}_${instanceId}${extension}`;
         } catch (error) {
-            return `image_${index.toString().padStart(3, '0')}.jpg`;
+            const instanceId = this.instanceId ? this.instanceId.split('_').pop() : 'unknown';
+            return `image_${index.toString().padStart(3, '0')}_${instanceId}.jpg`;
         }
     }
 
@@ -3836,60 +3951,76 @@ class XiaohongshuScraper {
     
     async getUnifiedLoginStatus() {
         try {
-            // 如果正在等待登录完成，直接返回登录成功，避免登录框闪烁
-            if (this._isWaitingForLogin) {
-                console.log('⏳ 正在等待登录完成，跳过统一登录状态检测...');
-                return {
-                    isLoggedIn: true,
-                    loginScore: 10,
-                    cookieScore: 10,
-                    pageLoggedIn: true,
-                    unified: true,
-                    reason: '正在等待登录完成，跳过检测'
-                };
-            }
-            
             // 第一步：检查Cookie文件评分
             const cookieScore = await this.getCookieScore();
+            console.log(`🍪 Cookie评分: ${cookieScore}`);
             
-            // 第二步：检查页面登录状态
-            // 如果正在等待登录完成，跳过页面登录状态检查，避免登录框闪烁
+            // 第二步：真正检查页面登录状态
             let pageLoggedIn = false;
-            if (this._isWaitingForLogin) {
-                console.log('⏳ 正在等待登录完成，跳过页面登录状态检查...');
-                pageLoggedIn = true; // 假设已登录，避免登录框闪烁
-            } else {
-                // 检查全局状态，防止多个实例同时处理登录
-                if (!globalLoginManager.canStartLoginProcess(this.instanceId)) {
-                    console.log('⏳ 其他实例正在处理登录，跳过页面登录状态检查...');
-                    pageLoggedIn = true; // 假设已登录，避免重复检测
+            let pageLoginDetails = '';
+            
+            try {
+                // 检查页面是否显示登录弹窗或登录提示
+                const pageLoginStatus = await this.page.evaluate(() => {
+                    const bodyText = document.body ? document.body.innerText : '';
+                    const hasLoginModal = document.querySelector('[class*="modal"], [class*="popup"], [class*="dialog"]') !== null;
+                    const hasLoginPrompt = bodyText.includes('登录后查看') || 
+                                         bodyText.includes('扫码登录') || 
+                                         bodyText.includes('手机号登录') ||
+                                         bodyText.includes('登录后推荐') ||
+                                         bodyText.includes('马上登录即可');
+                    const hasLoginButton = Array.from(document.querySelectorAll('button, a')).some(el => 
+                        el.textContent && el.textContent.includes('登录')
+                    );
+                    
+                    return {
+                        hasLoginModal,
+                        hasLoginPrompt,
+                        hasLoginButton,
+                        bodyText: bodyText.substring(0, 200),
+                        url: window.location.href
+                    };
+                });
+                
+                console.log('🔍 页面登录状态检查:', pageLoginStatus);
+                
+                // 如果页面显示登录相关元素，说明未登录
+                if (pageLoginStatus.hasLoginModal || pageLoginStatus.hasLoginPrompt || pageLoginStatus.hasLoginButton) {
+                    pageLoggedIn = false;
+                    pageLoginDetails = '页面显示登录弹窗或登录提示';
+                    console.log('❌ 页面显示需要登录:', pageLoginDetails);
                 } else {
-                    // 在等待期间完全停止所有登录状态检测，避免登录框闪烁
-                    console.log('⏳ 等待期间停止登录状态检测，避免登录框闪烁...');
-                    await this.page.waitForTimeout(1000); // 等待1秒
-                    pageLoggedIn = true; // 假设已登录，避免登录框闪烁
+                    pageLoggedIn = true;
+                    pageLoginDetails = '页面未显示登录相关元素';
+                    console.log('✅ 页面登录状态正常');
                 }
+                
+            } catch (error) {
+                console.log(`⚠️ 检查页面登录状态时出错: ${error.message}`);
+                pageLoggedIn = false;
+                pageLoginDetails = `检查页面状态出错: ${error.message}`;
             }
             
-            // 第三步：综合判断（优化标准）
-            const finalScore = cookieScore;
-            // 降低阈值：如果Cookie评分较高（>=2），即使页面检测失败也认为已登录
-            const isLoggedIn = (pageLoggedIn && cookieScore >= 2) || cookieScore >= 5;
+            // 第三步：综合判断（严格标准）
+            // 必须同时满足：Cookie评分高 AND 页面没有登录提示
+            const isLoggedIn = cookieScore >= 5 && pageLoggedIn;
             
             console.log('🔍 统一登录状态检测结果:', {
                 cookieScore,
                 pageLoggedIn,
-                finalScore,
+                pageLoginDetails,
                 isLoggedIn,
-                threshold: 2,
-                reason: isLoggedIn ? '登录成功' : (cookieScore >= 5 ? 'Cookie评分高但页面检测失败' : 'Cookie评分不足')
+                threshold: 5,
+                reason: isLoggedIn ? '登录成功' : 
+                       (cookieScore < 5 ? 'Cookie评分不足' : '页面显示需要登录')
             });
             
             return {
                 isLoggedIn,
-                loginScore: finalScore,
+                loginScore: cookieScore,
                 cookieScore,
                 pageLoggedIn,
+                pageLoginDetails,
                 unified: true
             };
         } catch (error) {
@@ -3952,6 +4083,76 @@ class XiaohongshuScraper {
         } catch (error) {
             console.error('获取Cookie评分失败:', error);
             return 0;
+        }
+    }
+
+    /**
+     * 重置爬虫状态
+     * 用于单实例模式下的状态清理
+     * @returns {Promise<void>}
+     */
+    async resetState() {
+        try {
+            this.log('🔄 重置爬虫状态...', 'info');
+            
+            // 重置下载计数和错误
+            this.downloadedCount = 0;
+            this.errors = [];
+            
+            // 重置登录窗口状态
+            this.isLoginWindowOpen = false;
+            
+            // 重置全局登录状态
+            this._globalLoginState = {
+                isReopening: false,
+                lastReopenTime: 0,
+                reopenCount: 0
+            };
+            
+            // 清理日志缓存
+            this._logCache.clear();
+            
+            // 如果页面存在，清理页面状态并导航到首页
+            if (this.page) {
+                try {
+                    // 清理页面中的任何弹窗或遮罩
+                    await this.page.evaluate(() => {
+                        // 清理可能的弹窗
+                        const modals = document.querySelectorAll('[class*="modal"], [class*="popup"], [class*="dialog"]');
+                        modals.forEach(modal => {
+                            if (modal.style) {
+                                modal.style.display = 'none';
+                            }
+                        });
+                        
+                        // 清理可能的遮罩
+                        const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"], [class*="backdrop"]');
+                        overlays.forEach(overlay => {
+                            if (overlay.style) {
+                                overlay.style.display = 'none';
+                            }
+                        });
+                    });
+                    
+                    // 导航到首页，确保搜索状态干净
+                    this.log('🔄 导航到首页，重置搜索状态...', 'info');
+                    await this.page.goto('https://www.xiaohongshu.com/explore', { 
+                        waitUntil: 'domcontentloaded',
+                        timeout: 15000
+                    });
+                    await this.page.waitForTimeout(2000); // 等待页面稳定
+                    
+                    this.log('✅ 页面状态已清理并重置', 'info');
+                } catch (error) {
+                    this.log(`⚠️ 清理页面状态时出错: ${error.message}`, 'warning');
+                }
+            }
+            
+            this.log('✅ 爬虫状态重置完成', 'success');
+            
+        } catch (error) {
+            this.log(`❌ 重置爬虫状态失败: ${error.message}`, 'error');
+            throw error;
         }
     }
 }

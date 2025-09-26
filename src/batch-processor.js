@@ -30,7 +30,7 @@ class BatchProcessor {
             timeout: 30000,
             tryRemoveWatermark: true,
             enableImageProcessing: true,
-            maxConcurrent: 2, // 最大并发数
+            maxConcurrent: 1, // 最大并发数设置为1，实现串行处理
             ...options.options
         };
         this.io = options.io;
@@ -68,6 +68,12 @@ class BatchProcessor {
         
         // 共享登录状态
         this.sharedLoginState = null;
+        
+        // 全局爬虫实例（单实例模式）
+        this.globalScraper = null;
+        
+        // 登录状态标记（单实例模式优化）
+        this.isLoginVerified = false;
     }
 
     /**
@@ -124,6 +130,9 @@ class BatchProcessor {
                 this.log(`✅ 预登录完成，开始批量处理...`, 'success');
             }
             
+            // 全局爬虫实例已在preLogin中创建
+            this.log(`✅ 全局爬虫实例已准备就绪`, 'info');
+            
             // 开始处理任务
             this.log(`🎯 开始处理任务队列...`, 'info');
             await this.processTasks();
@@ -147,93 +156,57 @@ class BatchProcessor {
             this.emitPreLoginStatus(true, 10);
             this.log('🔧 创建登录实例...', 'info');
             
-            // 优先使用WebInterface的浏览器实例，避免重复创建
-            let loginScraper;
-            const browserInfo = this.webInterface ? this.webInterface.getBrowserInstance() : null;
-            if (browserInfo && browserInfo.browser && browserInfo.isInitialized) {
-                this.log('♻️ 复用WebInterface的浏览器实例...', 'info');
-                
-                // 使用WebInterface的浏览器实例创建爬虫
-                loginScraper = new XiaohongshuScraper({
-                    headless: false,
-                    browserType: 'chromium',
-                    login: {
-                        method: 'manual',
-                        autoLogin: true,
-                        saveCookies: true,
-                        cookieFile: './cookies.json'
-                    }
-                });
-                
-                // 直接使用WebInterface的浏览器实例
-                loginScraper.browser = browserInfo.browser;
-                loginScraper.page = browserInfo.page;
-                loginScraper.isBrowserInitialized = true;
-                
-                this.log('✅ 已复用WebInterface的浏览器实例', 'success');
-            } else {
-                this.log('🔧 创建新的登录实例...', 'info');
-                
-                // 创建新的登录实例
-                const { XiaohongshuScraper } = require('./xiaohongshu-scraper');
-                loginScraper = new XiaohongshuScraper({
-                    headless: false, // 显示浏览器窗口，让用户看到登录过程
-                    browserType: 'chromium',
-                    login: {
-                        method: 'manual',
-                        autoLogin: true,
-                        saveCookies: true,
-                        cookieFile: './cookies.json'
-                    }
-                });
-                
-                // 设置Web接口实例，用于前端状态同步
-                if (this.webInterface) {
-                    loginScraper.setWebInterface(this.webInterface);
+            // 单实例模式：直接创建全局爬虫实例，跳过预登录阶段
+            this.log('🔧 单实例模式：直接创建全局爬虫实例...', 'info');
+            
+            // 创建全局爬虫实例
+            this.globalScraper = new XiaohongshuScraper({
+                downloadPath: this.outputPath,
+                maxImages: this.options.maxImages,
+                headless: this.options.headless,
+                delay: this.options.delay,
+                timeout: this.options.timeout,
+                tryRemoveWatermark: this.options.tryRemoveWatermark,
+                enableImageProcessing: this.options.enableImageProcessing,
+                logger: this.logger,
+                login: {
+                    method: 'manual',
+                    autoLogin: true,
+                    saveCookies: true,
+                    cookieFile: './cookies.json'
+                },
+                logCallback: (message, level) => {
+                    this.log(message, level);
                 }
-                
-                // 发送预登录进度更新
-                this.emitPreLoginStatus(true, 30);
-                this.log('🚀 初始化浏览器...', 'info');
-                // 初始化浏览器
-                await loginScraper.initBrowser();
+            });
+            
+            // 设置Web接口实例
+            if (this.webInterface) {
+                this.globalScraper.setWebInterface(this.webInterface);
             }
+            
+            // 发送预登录进度更新
+            this.emitPreLoginStatus(true, 30);
+            this.log('🚀 初始化全局爬虫实例浏览器...', 'info');
+            await this.globalScraper.initBrowser();
             
             // 发送预登录进度更新
             this.emitPreLoginStatus(true, 60);
             this.log('🔐 开始登录流程...', 'info');
-            // 执行登录
-            const loginSuccess = await loginScraper.autoLogin();
+            const loginSuccess = await this.globalScraper.autoLogin();
             
             if (loginSuccess) {
-                // 发送预登录进度更新
-                this.emitPreLoginStatus(true, 90);
-                this.log('✅ 登录成功，保存共享状态...', 'success');
-                
-                // 获取当前页面的Cookie
-                const cookies = await loginScraper.page.context().cookies();
-                
-                // 保存登录状态，供后续爬虫使用
-                this.sharedLoginState = {
-                    isLoggedIn: true,
-                    browser: loginScraper.browser,
-                    page: loginScraper.page,
-                    cookies: cookies,
-                    scraper: loginScraper // 保持爬虫实例引用
-                };
-                
                 // 发送预登录完成状态
                 this.emitPreLoginStatus(false, 100);
-                this.log('🎉 预登录完成，所有爬虫实例将共享此登录状态', 'success');
+                this.log('✅ 全局爬虫实例登录成功', 'success');
                 
-                // 重置全局登录状态，避免后续实例被阻止
-                const globalLoginManager = require('./global-login-manager');
-                globalLoginManager.resetReopenCount();
+                // 设置登录验证标记，后续任务不再重复检查登录
+                this.isLoginVerified = true;
+                this.log('🔐 登录状态已验证，后续任务将跳过登录检查', 'info');
                 
                 return true;
             } else {
-                this.log('❌ 登录失败，清理资源...', 'error');
-                await loginScraper.close();
+                this.log('❌ 全局爬虫实例登录失败', 'error');
                 // 发送预登录失败状态
                 this.emitPreLoginStatus(false, 0);
                 return false;
@@ -262,6 +235,7 @@ class BatchProcessor {
         }
     }
 
+
     /**
      * 清理共享登录状态
      * @private
@@ -287,6 +261,18 @@ class BatchProcessor {
             this.log('正在停止批量下载任务...', 'info');
             this._isRunning = false;
             this.isPaused = false;
+            
+            // 清理全局爬虫实例
+            if (this.globalScraper) {
+                try {
+                    this.log('🧹 清理全局爬虫实例...', 'info');
+                    await this.globalScraper.close();
+                    this.globalScraper = null;
+                    this.log('✅ 全局爬虫实例已清理', 'info');
+                } catch (error) {
+                    this.log(`⚠️ 清理全局爬虫实例时出错: ${error.message}`, 'warning');
+                }
+            }
             
             // 清理共享登录状态
             await this.cleanupSharedLoginState();
@@ -333,37 +319,35 @@ class BatchProcessor {
     }
 
     /**
-     * 处理任务队列
+     * 处理任务队列 - 串行处理，确保一个窗口完成登录后再弹出其他实例
      * @private
      */
     async processTasks() {
-        while (this._isRunning && !this.isPaused && this.currentIndex < this.taskQueue.length) {
-            // 检查并发限制
-            if (this.activeTasks.size >= this.options.maxConcurrent) {
-                this.log(`⏳ 等待并发任务完成 (当前活跃任务: ${this.activeTasks.size}/${this.options.maxConcurrent})`, 'info');
-                await this.waitForTaskCompletion();
-                continue;
+        this.log(`🔄 开始串行处理任务队列 (总任务数: ${this.taskQueue.length})`, 'info');
+        
+        for (let i = 0; i < this.taskQueue.length; i++) {
+            if (!this._isRunning || this.isPaused) {
+                this.log(`⏸️ 任务处理已停止或暂停`, 'info');
+                break;
             }
             
-            const task = this.taskQueue[this.currentIndex];
+            const task = this.taskQueue[i];
             if (task.status === 'pending') {
-                this.log(`🚀 启动任务: ${task.restaurant.name}`, 'info');
-                this.processTask(task);
-            }
-            
-            this.currentIndex++;
-        }
-        
-        // 等待所有活跃任务完成
-        if (this.activeTasks.size > 0) {
-            this.log(`⏳ 等待所有活跃任务完成 (剩余: ${this.activeTasks.size})`, 'info');
-            while (this.activeTasks.size > 0) {
-                await this.waitForTaskCompletion();
+                this.log(`🚀 启动任务 ${i + 1}/${this.taskQueue.length}: ${task.restaurant.name}`, 'info');
+                this.log(`📊 当前索引: ${i + 1}/${this.taskQueue.length}`, 'info');
+                
+                // 串行处理：等待当前任务完成后再处理下一个
+                await this.processTask(task);
+                
+                // 更新当前索引
+                this.currentIndex = i + 1;
+                this.emitStatus();
             }
         }
         
-        // 所有任务完成 - 无论_isRunning状态如何，都要调用complete()
-        this.complete();
+        // 所有任务完成
+        this.log(`✅ 所有任务处理完成`, 'success');
+        await this.complete();
     }
 
     /**
@@ -395,57 +379,19 @@ class BatchProcessor {
             this.log(`开始处理餐馆: ${restaurant.name} (${restaurant.location})`, 'info');
             this.log(`📊 任务进度: ${this.currentIndex + 1}/${this.restaurants.length}`, 'info');
             
-            // 创建爬虫实例，使用已保存的Cookie
-            this.log(`🔧 正在初始化爬虫实例...`, 'info');
-            const scraperStartTime = Date.now();
-            const scraper = new XiaohongshuScraper({
-                downloadPath: this.outputPath,
-                maxImages: restaurant.maxImages || this.options.maxImages,
-                headless: this.options.headless,
-                delay: this.options.delay,
-                timeout: this.options.timeout,
-                tryRemoveWatermark: this.options.tryRemoveWatermark,
-                enableImageProcessing: this.options.enableImageProcessing,
-                logger: this.logger, // 传递日志管理器
-                login: {
-                    method: 'manual',
-                    autoLogin: true,
-                    saveCookies: true,
-                    cookieFile: './cookies.json'
-                },
-                logCallback: (message, level) => {
-                    // 将爬虫的日志转发到批量处理器
-                    this.log(message, level);
-                }
-            });
+            // 使用全局爬虫实例（单实例模式）
+            this.log(`🔄 使用全局爬虫实例处理餐馆: ${restaurant.name}`, 'info');
             
-            // 为每个爬虫实例设置唯一的实例ID，避免状态混乱
-            scraper.instanceId = `scraper_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            this.log(`🆔 爬虫实例ID: ${scraper.instanceId}`, 'info');
+            // 重置爬虫状态，确保每次搜索都是干净的状态
+            await this.resetGlobalScraperState(restaurant);
             
-            // 设置Web接口实例，用于前端状态同步
-            if (this.webInterface) {
-                scraper.setWebInterface(this.webInterface);
-            }
-            
-            // 初始化爬虫实例的浏览器实例
-            this.log(`🚀 初始化爬虫实例浏览器...`, 'info');
-            await scraper.initBrowser();
-            
-            // 设置共享登录状态，避免重复登录
-            if (this.sharedLoginState) {
-                scraper.setSharedLoginState(this.sharedLoginState);
-                this.log(`🔄 为餐馆 "${restaurant.name}" 设置共享登录状态`, 'info');
-            }
-            
-            task.scraper = scraper;
-            const scraperInitTime = Date.now() - scraperStartTime;
-            this.log(`✅ 爬虫实例初始化完成 (耗时: ${scraperInitTime}ms)`, 'info');
+            // 设置任务使用的爬虫实例
+            task.scraper = this.globalScraper;
             
             // 执行搜索和下载
             this.log(`🔍 开始搜索和下载图片...`, 'info');
             const searchStartTime = Date.now();
-            const result = await scraper.searchAndDownload(restaurant.name, restaurant.location);
+            const result = await this.globalScraper.searchAndDownload(restaurant.name, restaurant.location);
             const searchTime = Date.now() - searchStartTime;
             this.log(`⏱️ 搜索和下载完成 (耗时: ${searchTime}ms)`, 'info');
             
@@ -498,25 +444,56 @@ class BatchProcessor {
                 clearTimeout(timeoutId);
             }
             
-            // 清理资源
+            // 清理资源（单实例模式，不关闭全局爬虫实例）
             const totalTime = Date.now() - startTime;
-            this.log(`🧹 正在清理资源... (任务总耗时: ${totalTime}ms)`, 'info');
-            if (task.scraper) {
-                try {
-                    // 注意：如果使用了共享登录状态，不要关闭共享的浏览器实例
-                    if (!this.sharedLoginState || task.scraper.browser !== this.sharedLoginState.browser) {
-                        await task.scraper.close();
-                        this.log(`✅ 爬虫实例已关闭`, 'info');
-                    } else {
-                        this.log(`🔄 跳过关闭共享浏览器实例`, 'info');
-                    }
-                } catch (closeError) {
-                    this.log(`⚠️ 关闭爬虫实例时出错: ${closeError.message}`, 'warning');
-                }
-            }
+            this.log(`🧹 任务完成，清理任务状态... (任务总耗时: ${totalTime}ms)`, 'info');
+            
+            // 单实例模式：不关闭全局爬虫实例，只清理任务状态
             this.activeTasks.delete(task);
-            this.log(`✅ 资源清理完成，活跃任务数: ${this.activeTasks.size}`, 'info');
+            this.log(`✅ 任务状态清理完成，活跃任务数: ${this.activeTasks.size}`, 'info');
             this.emitStatus();
+        }
+    }
+
+    /**
+     * 重置全局爬虫状态
+     * @param {Object} restaurant - 餐馆信息
+     * @private
+     */
+    async resetGlobalScraperState(restaurant) {
+        try {
+            this.log(`🔄 重置全局爬虫状态，准备处理餐馆: ${restaurant.name}`, 'info');
+            
+            // 更新爬虫配置
+            this.globalScraper.config.maxImages = restaurant.maxImages || this.options.maxImages;
+            this.globalScraper.config.downloadPath = this.outputPath;
+            
+            // 重置爬虫内部状态
+            this.globalScraper.downloadedCount = 0;
+            this.globalScraper.errors = [];
+            
+            // 更新实例ID，确保每个餐馆的图片文件名唯一
+            const newInstanceId = `scraper_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            this.globalScraper.instanceId = newInstanceId;
+            this.log(`🆔 更新爬虫实例ID: ${newInstanceId}`, 'info');
+            
+            // 单实例模式优化：如果登录已验证，跳过登录检查
+            if (this.isLoginVerified) {
+                this.log(`🔐 登录状态已验证，跳过登录检查，直接进行搜索`, 'info');
+                // 设置爬虫的登录状态，避免重复检查
+                this.globalScraper.isLoginVerified = true;
+            }
+            
+            // 如果爬虫有重置方法，调用它
+            if (typeof this.globalScraper.resetState === 'function') {
+                await this.globalScraper.resetState();
+                this.log(`✅ 全局爬虫状态已重置`, 'info');
+            } else {
+                this.log(`⚠️ 爬虫实例没有重置方法，跳过状态重置`, 'warning');
+            }
+            
+        } catch (error) {
+            this.log(`⚠️ 重置全局爬虫状态时出错: ${error.message}`, 'warning');
         }
     }
 
@@ -579,7 +556,7 @@ class BatchProcessor {
      * 完成所有任务
      * @private
      */
-    complete() {
+    async complete() {
         // 确保任务状态为完成
         this._isRunning = false;
         this.isPaused = false;
@@ -608,6 +585,18 @@ class BatchProcessor {
         
         // 发送最终状态更新
         this.emitStatus();
+        
+        // 清理全局爬虫实例
+        if (this.globalScraper) {
+            try {
+                this.log('🧹 清理全局爬虫实例...', 'info');
+                await this.globalScraper.close();
+                this.globalScraper = null;
+                this.log('✅ 全局爬虫实例已清理', 'info');
+            } catch (error) {
+                this.log(`⚠️ 清理全局爬虫实例时出错: ${error.message}`, 'warning');
+            }
+        }
         
         // 通知Web界面任务已完成，可以停止心跳检测
         if (this.webInterface) {
