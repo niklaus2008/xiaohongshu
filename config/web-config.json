@@ -1,23 +1,13 @@
 {
   "restaurants": [
     {
-      "name": "彬宴江南·淮扬家宴·北京烤鸭·江南",
-      "location": "北京团结湖",
-      "maxImages": 10
-    },
-    {
-      "name": "闽中闽·福建菜(团结湖店)",
-      "location": "北京团结湖",
-      "maxImages": 10
-    },
-    {
-      "name": "真地道·鲜橙烤鸭·北京菜(朝阳公园甜水园店)",
-      "location": "北京团结湖",
+      "name": "鱼匠炉端烧居酒屋(小庄店)",
+      "location": "北京小庄",
       "maxImages": 10
     }
   ],
   "outputPath": "/Users/liuqiang/Downloads",
-  "maxImages": 10,
+  "maxImages": 11,
   "delay": 2000,
   "tryRemoveWatermark": true,
   "enableImageProcessing": true,

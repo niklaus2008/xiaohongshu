@@ -176,7 +176,7 @@
                                 </label>
                             </div>
                             <small class="form-text text-muted">
-                                支持JSON和CSV格式，CSV格式：餐馆名称,地点,下载的图片数
+                                支持JSON和CSV格式，CSV格式：餐馆名称,地点（图片数统一由配置设置控制）
                             </small>
                         </div>
                         
@@ -317,10 +317,6 @@
                         <div class="mb-3">
                             <label for="restaurantLocation" class="form-label">地点 *</label>
                             <input type="text" class="form-control" id="restaurantLocation" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="restaurantMaxImages" class="form-label">下载的图片数</label>
-                            <input type="number" class="form-control" id="restaurantMaxImages" value="6" min="1" max="100">
                         </div>
                     </form>
                 </div>

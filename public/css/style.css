@@ -9,13 +9,16 @@
 body {
     background-color: #f8f9fa;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 16px; /* 增大基础字体大小 */
+    line-height: 1.6; /* 增加行高提高可读性 */
 }
 
 /* 容器宽度优化 */
 .container {
-    max-width: 1200px;
+    max-width: 1400px; /* 增大容器宽度 */
     margin: 0 auto;
     padding: 0 20px;
+    font-size: 18px; /* 增大容器内字体大小 */
 }
 
 /* 响应式容器调整 */
@@ -36,6 +39,17 @@ body {
 header {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    padding: 25px 0; /* 增加头部内边距 */
+}
+
+header h1 {
+    font-size: 2.2rem; /* 增大标题字体 */
+    font-weight: 700; /* 增加字体粗细 */
+}
+
+header p {
+    font-size: 1.1rem; /* 增大副标题字体 */
+    margin-top: 8px;
 }
 
 /* 卡片样式 */
@@ -44,6 +58,13 @@ header {
     border-radius: 12px;
     box-shadow: 0 2px 15px rgba(0,0,0,0.08);
     transition: all 0.3s ease;
+    margin-bottom: 25px; /* 增加卡片间距 */
+    padding: 20px; /* 增加卡片内边距 */
+}
+
+.card-body {
+    padding: 25px; /* 增加卡片内容内边距 */
+    font-size: 1.05rem; /* 增大卡片内容字体 */
 }
 
 .card:hover {
@@ -56,6 +77,13 @@ header {
     border-bottom: 1px solid #dee2e6;
     border-radius: 12px 12px 0 0 !important;
     font-weight: 600;
+    padding: 20px 25px; /* 增加头部内边距 */
+    font-size: 1.2rem; /* 增大头部字体 */
+}
+
+.card-title {
+    font-size: 1.3rem; /* 增大标题字体 */
+    font-weight: 700; /* 增加字体粗细 */
 }
 
 /* 现代进度条样式 */
@@ -151,6 +179,8 @@ header {
     border: none;
     position: relative;
     overflow: hidden;
+    font-size: 1.05rem; /* 增大按钮字体 */
+    padding: 12px 20px; /* 增加按钮内边距 */
 }
 
 .btn::before {
@@ -195,6 +225,14 @@ header {
     border-radius: 8px;
     border: 2px solid #e9ecef;
     transition: all 0.3s ease;
+    font-size: 1.05rem; /* 增大表单字体 */
+    padding: 12px 15px; /* 增加表单内边距 */
+}
+
+.form-label {
+    font-size: 1.1rem; /* 增大标签字体 */
+    font-weight: 600; /* 增加标签字体粗细 */
+    margin-bottom: 8px; /* 增加标签下边距 */
 }
 
 .form-control:focus {
@@ -549,8 +587,77 @@ header {
     box-shadow: 0 8px 25px rgba(59, 130, 246, 0.4);
 }
 
+/* 页面初始显示优化 */
+body {
+    zoom: 1.4; /* 整体放大20% */
+}
+
+/* 确保页面内容在视窗中合理显示 */
+.container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 主要内容区域滚动优化 */
+#contentSection {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 70vh; /* 限制内容区域高度，启用滚动 */
+    padding: 20px 0; /* 增加内容区域内边距 */
+}
+
+/* 顶部配置区域固定显示 */
+.row:first-of-type,
+.row:nth-of-type(2),
+.row:nth-of-type(3) {
+    flex-shrink: 0; /* 防止顶部区域被压缩 */
+    margin-bottom: 30px; /* 增加区域间距 */
+}
+
+/* 优化滚动条样式 */
+#contentSection::-webkit-scrollbar {
+    width: 12px;
+}
+
+#contentSection::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 6px;
+}
+
+#contentSection::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 6px;
+}
+
+#contentSection::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* 增加文字对比度和可读性 */
+.text-muted {
+    color: #495057 !important; /* 增强对比度 */
+}
+
+.small, small {
+    font-size: 0.95rem; /* 增大小字体 */
+}
+
+/* 优化间距 */
+.mb-3 {
+    margin-bottom: 1.5rem !important; /* 增加底部间距 */
+}
+
+.mb-4 {
+    margin-bottom: 2rem !important; /* 增加底部间距 */
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
+    body {
+        zoom: 1.0; /* 移动端恢复正常缩放 */
+    }
+    
     .container-fluid {
         padding: 10px;
     }

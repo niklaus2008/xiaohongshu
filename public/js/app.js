@@ -203,12 +203,12 @@ class XiaohongshuDownloaderApp {
             title.textContent = '编辑餐馆';
             document.getElementById('restaurantName').value = restaurant.name;
             document.getElementById('restaurantLocation').value = restaurant.location;
-            document.getElementById('restaurantMaxImages').value = restaurant.maxImages || 10;
+            // 移除餐馆单独图片数设置，统一使用全局配置
         } else {
             // 新增模式
             title.textContent = '添加餐馆';
             document.getElementById('restaurantForm').reset();
-            document.getElementById('restaurantMaxImages').value = 10;
+            // 移除餐馆单独图片数设置，统一使用全局配置
         }
         
         modal.show();
@@ -220,7 +220,8 @@ class XiaohongshuDownloaderApp {
     saveRestaurant() {
         const name = document.getElementById('restaurantName').value.trim();
         const location = document.getElementById('restaurantLocation').value.trim();
-        const maxImages = parseInt(document.getElementById('restaurantMaxImages').value) || 10;
+        // 统一使用全局配置的图片数
+        const maxImages = parseInt(document.getElementById('maxImages').value) || 10;
         
         if (!name || !location) {
             this.showError('请填写餐馆名称和地点');
@@ -291,7 +292,7 @@ class XiaohongshuDownloaderApp {
                         </div>
                         <div class="restaurant-max-images">
                             <i class="fas fa-images me-1"></i>
-                            下载的图片数: ${restaurant.maxImages}
+                            下载的图片数: ${parseInt(document.getElementById('maxImages').value) || 10}
                         </div>
                     </div>
                     <div class="restaurant-actions">
@@ -385,8 +386,8 @@ class XiaohongshuDownloaderApp {
                 // 清理并添加新导入的餐馆
                 const cleanedRestaurants = validRestaurants.map(restaurant => ({
                     name: restaurant.name.replace(/[\r\n\t\s]+/g, ' ').trim(),
-                    location: restaurant.location.replace(/[\r\n\t\s]+/g, ' ').trim(),
-                    maxImages: restaurant.maxImages || 10
+                    location: restaurant.location.replace(/[\r\n\t\s]+/g, ' ').trim()
+                    // 移除maxImages，统一使用全局配置
                 }));
                 
                 this.restaurants.push(...cleanedRestaurants);
@@ -478,8 +479,8 @@ class XiaohongshuDownloaderApp {
             
             const restaurant = {
                 name: parts[0],
-                location: parts[1],
-                maxImages: parseInt(parts[2]) || 10
+                location: parts[1]
+                // 移除maxImages，统一使用全局配置
             };
             
             this.addLog(`成功解析餐馆：${restaurant.name} - ${restaurant.location}`, 'success');

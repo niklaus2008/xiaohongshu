@@ -464,8 +464,8 @@ class BatchProcessor {
         try {
             this.log(`🔄 重置全局爬虫状态，准备处理餐馆: ${restaurant.name}`, 'info');
             
-            // 更新爬虫配置
-            this.globalScraper.config.maxImages = restaurant.maxImages || this.options.maxImages;
+            // 更新爬虫配置 - 统一使用全局配置的图片数
+            this.globalScraper.config.maxImages = this.options.maxImages;
             this.globalScraper.config.downloadPath = this.outputPath;
             
             // 重置爬虫内部状态
