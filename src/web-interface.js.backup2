@@ -28,22 +28,6 @@ class WebInterface {
      */
     async getUnifiedLoginStatus() {
         try {
-            console.log('🔍 Web接口调用 getUnifiedLoginStatus 方法...');
-            console.log('🕐 调用时间:', new Date().toISOString());
-            console.log('📞 调用来源: Web接口 getUnifiedLoginStatus 方法');
-            console.log('🔍 调用堆栈:', new Error().stack);
-            
-            // 检查是否有爬虫实例正在等待登录完成
-            if (this.batchProcessor && this.batchProcessor.globalScraper && this.batchProcessor.globalScraper._isWaitingForLogin) {
-                console.log('⏳ 爬虫实例正在等待登录完成，跳过登录状态检查...');
-                return {
-                    isLoggedIn: true, // 假设登录正在进行中
-                    loginScore: 10,
-                    cookieInfo: { count: 0, expires: 0 },
-                    reason: '正在等待登录完成，跳过检查'
-                };
-            }
-            
             const cookieFile = path.join(__dirname, '../cookies.json');
             let isLoggedIn = false;
             let cookieInfo = null;
@@ -698,11 +682,6 @@ class WebInterface {
      * @returns {Object} 当前状态信息
      */
     getCurrentStatus() {
-        console.log('🔍 调用 getCurrentStatus 方法...');
-        console.log('🕐 调用时间:', new Date().toISOString());
-        console.log('📞 调用来源: getCurrentStatus 方法');
-        console.log('🔍 调用堆栈:', new Error().stack);
-        
         const baseStatus = {
             isRunning: false,
             progress: 0,
@@ -757,23 +736,6 @@ class WebInterface {
         
         // 每60秒发送一次心跳检测，减少频率
         this.heartbeatInterval = setInterval(() => {
-            console.log('💓 心跳检测触发...');
-            console.log('🕐 心跳时间:', new Date().toISOString());
-            console.log('📞 调用来源: 心跳检测定时器');
-            
-            // 检查是否有全局爬虫实例正在登录
-            if (this.batchProcessor && this.batchProcessor.globalScraper) {
-                const eventDrivenStatus = this.batchProcessor.globalScraper.eventDrivenLoginManager.getState();
-                console.log('🔍 [心跳检测] 事件驱动登录管理器状态:', eventDrivenStatus);
-                
-                if (eventDrivenStatus.isWaitingForLogin || eventDrivenStatus.isLoginWindowOpen) {
-                    console.log('⏳ [心跳检测] 正在等待登录完成，跳过状态检查...');
-                    console.log('🛡️ [心跳检测] 防重复机制：避免在登录过程中触发状态检查');
-                    console.log('📊 [心跳检测] 跳过原因 - isWaitingForLogin:', eventDrivenStatus.isWaitingForLogin, 'isLoginWindowOpen:', eventDrivenStatus.isLoginWindowOpen);
-                    return; // 跳过本次心跳检测
-                }
-            }
-            
             if (this.batchProcessor && this.batchProcessor.isRunning()) {
                 const status = this.getCurrentStatus();
                 // 只在状态变化时发送日志
@@ -1034,7 +996,8 @@ class WebInterface {
             // 创建临时爬虫实例进行检测
             const { XiaohongshuScraper } = require('./xiaohongshu-scraper');
             const tempScraper = new XiaohongshuScraper({
-                headless: false
+                headless: false,
+                browserType: 'user-browser'
             });
             
             // 使用现有浏览器实例
@@ -1078,6 +1041,214 @@ class WebInterface {
      * 已移除 handleOpenBrowser 方法
      * 避免重复创建登录窗口，现在只有后端爬虫系统负责创建登录窗口
      */
+    // async handleOpenBrowser(req, res) {
+    //     try {
+            const { url } = req.body;
+            
+            if (!url || typeof url !== 'string') {
+                return res.status(400).json({
+                    success: false,
+                    error: '请提供有效的URL'
+                });
+            }
+            
+            // 防止重复打开登录窗口，但允许强制重置
+            if (this.isLoginWindowOpen) {
+                console.log('⚠️ 检测到登录窗口状态异常，正在检查浏览器状态...');
+                this.logger.sendWarningLog('检测到登录窗口状态异常，正在检查浏览器状态...');
+                
+                // 检查浏览器是否真的还在运行
+                if (this.browserInstance && this.browserPage) {
+                    try {
+                        // 尝试访问页面，如果失败说明浏览器已关闭
+                        await this.browserPage.url();
+                        console.log('✅ 浏览器实例正常，继续使用现有窗口');
+                        this.logger.sendServiceLog('浏览器实例正常，继续使用现有窗口', 'info');
+                    } catch (error) {
+                        console.log('⚠️ 浏览器实例已关闭，将创建新的登录窗口');
+                        this.logger.sendWarningLog('浏览器实例已关闭，将创建新的登录窗口');
+                        this.browserInstance = null;
+                        this.browserPage = null;
+                        this.isLoginWindowOpen = false;
+                    }
+                } else {
+                    console.log('⚠️ 浏览器实例不存在，将创建新的登录窗口');
+                    this.logger.sendWarningLog('浏览器实例不存在，将创建新的登录窗口');
+                    this.isLoginWindowOpen = false;
+                }
+                
+                // 如果浏览器状态正常，返回现有窗口信息
+                if (this.isLoginWindowOpen) {
+                    return res.json({
+                        success: true,
+                        message: '登录窗口已存在，请检查浏览器窗口',
+                        existingWindow: true
+                    });
+                }
+            }
+            
+            console.log(`🌐 正在使用用户当前浏览器打开: ${url}`);
+            this.logger.sendServiceLog(`正在使用用户当前浏览器打开: ${url}`, 'info');
+            
+            let browserSource = 'unknown';
+            let isUserBrowser = false;
+            
+            // 使用全局浏览器管理器获取浏览器实例
+            console.log('🔧 使用全局浏览器管理器获取浏览器实例...');
+            this.logger.sendServiceLog('使用全局浏览器管理器获取浏览器实例', 'info');
+            
+            const browserInfo = await this.globalBrowserManager.getBrowserInstance();
+            this.browserInstance = browserInfo.browser;
+            this.browserPage = browserInfo.page;
+            this.isBrowserInitialized = browserInfo.isInitialized;
+            browserSource = 'global_browser_manager';
+            
+            console.log('✅ 已获取全局浏览器实例');
+            this.logger.sendServiceLog('已获取全局浏览器实例', 'success');
+            
+            // 检查是否已有页面实例，避免创建新窗口
+            if (this.browserPage) {
+                try {
+                    await this.browserPage.evaluate(() => document.title);
+                    console.log('✅ 使用现有页面实例，避免创建新窗口');
+                } catch (error) {
+                    console.log('⚠️ 现有页面实例无效，创建新页面');
+                    this.browserPage = null;
+                }
+            }
+            
+            // 创建新页面并打开指定URL（仅在必要时）
+            if (!this.browserPage) {
+                try {
+                    this.browserPage = await this.browserInstance.newPage();
+                } catch (error) {
+                    console.log(`⚠️ 创建新页面失败: ${error.message}`);
+                    throw error;
+                }
+            }
+            
+            try {
+                // 强制将页面置于前台，确保用户能看到
+                await this.browserPage.bringToFront();
+                console.log('👁️ 已将登录页面置于前台');
+                this.logger.sendServiceLog('已将登录页面置于前台', 'info');
+                
+                // 尝试最大化窗口
+                try {
+                    await this.browserPage.evaluate(() => {
+                        if (window.screen && window.screen.availWidth && window.screen.availHeight) {
+                            window.resizeTo(window.screen.availWidth, window.screen.availHeight);
+                            window.moveTo(0, 0);
+                        }
+                    });
+                    console.log('🖥️ 已尝试最大化登录窗口');
+                    this.logger.sendServiceLog('已尝试最大化登录窗口', 'info');
+                } catch (error) {
+                    console.log('⚠️ 无法最大化窗口，但继续执行');
+                    this.logger.sendWarningLog('无法最大化窗口，但继续执行');
+                }
+                
+                // 标记登录窗口已打开
+                this.isLoginWindowOpen = true;
+                
+                // 设置页面超时和用户代理
+                await this.browserPage.setDefaultTimeout(30000);
+                await this.browserPage.setExtraHTTPHeaders({
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                });
+                
+                await this.browserPage.goto(url, { 
+                    waitUntil: 'networkidle',
+                    timeout: 30000 
+                });
+                
+                console.log(`✅ 已使用用户当前浏览器打开: ${url}`);
+                this.logger.sendServiceLog(`已使用用户当前浏览器打开: ${url}`, 'success');
+                
+                // 如果是用户浏览器，提示用户完成登录
+                if (isUserBrowser) {
+                    this.logger.sendServiceLog('💡 请在打开的浏览器中完成小红书登录，然后点击"检查登录状态"', 'info');
+                    this.logger.sendServiceLog('⚠️ 重要：请勿关闭浏览器窗口，完成登录后程序会自动检测状态', 'warning');
+                }
+                
+                // 添加窗口查找指导
+                this.logger.sendServiceLog('💡 如果看不到登录窗口，请尝试以下方法：', 'info');
+                this.logger.sendServiceLog('   - 按 Alt+Tab (Windows) 或 Cmd+Tab (Mac) 切换窗口', 'info');
+                this.logger.sendServiceLog('   - 检查任务栏或Dock中的浏览器图标', 'info');
+                this.logger.sendServiceLog('   - 查看是否有新的浏览器窗口被打开', 'info');
+                this.logger.sendServiceLog('   - 检查是否有浏览器窗口在后台运行', 'info');
+                
+                // 监听页面关闭事件
+                this.browserPage.on('close', () => {
+                    this.isLoginWindowOpen = false;
+                    console.log('🔒 登录窗口已关闭');
+                    this.logger.sendServiceLog('登录窗口已关闭', 'info');
+                });
+                
+                res.json({
+                    success: true,
+                    message: '已使用用户当前浏览器打开页面',
+                    data: {
+                        url: url,
+                        timestamp: new Date().toISOString(),
+                        browserSource: browserSource,
+                        isUserBrowser: isUserBrowser,
+                        browserReused: !!this.browserInstance
+                    }
+                });
+                
+            } catch (pageError) {
+                console.error('打开页面失败:', pageError);
+                this.logger.sendErrorLog('打开页面失败', pageError);
+                
+                // 如果页面打开失败，尝试重新连接浏览器
+                if (isUserBrowser) {
+                    console.log('🔄 页面打开失败，尝试重新连接用户浏览器...');
+                    this.logger.sendServiceLog('页面打开失败，尝试重新连接用户浏览器', 'warning');
+                    
+                    try {
+                        this.browserInstance = await this.connectToUserBrowser();
+                        if (this.browserInstance) {
+                            this.browserPage = await this.browserInstance.newPage();
+                            await this.browserPage.goto(url, { 
+                                waitUntil: 'networkidle',
+                                timeout: 30000 
+                            });
+                            
+                            console.log(`✅ 重新连接成功，已打开: ${url}`);
+                            this.logger.sendServiceLog(`重新连接成功，已打开: ${url}`, 'success');
+                            
+                            res.json({
+                                success: true,
+                                message: '重新连接成功，已打开页面',
+                                data: {
+                                    url: url,
+                                    timestamp: new Date().toISOString(),
+                                    browserSource: 'reconnected_user_browser',
+                                    isUserBrowser: true,
+                                    browserReused: false
+                                }
+                            });
+                            return;
+                        }
+                    } catch (reconnectError) {
+                        console.error('重新连接失败:', reconnectError);
+                        this.logger.sendErrorLog('重新连接失败', reconnectError);
+                    }
+                }
+                
+                throw pageError;
+            }
+            
+        } catch (error) {
+            console.error('打开浏览器失败:', error);
+            this.logger.sendErrorLog('打开浏览器失败', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    }
 
     /**
      * 获取浏览器实例（供其他组件复用）

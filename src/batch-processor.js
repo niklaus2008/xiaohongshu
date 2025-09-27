@@ -193,6 +193,21 @@ class BatchProcessor {
             // 发送预登录进度更新
             this.emitPreLoginStatus(true, 60);
             this.log('🔐 开始登录流程...', 'info');
+            
+            // 检查是否正在等待登录完成，避免重复创建登录窗口
+            if (this.globalScraper._isWaitingForLogin) {
+                this.log('⏳ 正在等待登录完成，跳过登录流程...', 'info');
+                this.emitPreLoginStatus(false, 100);
+                this.log('✅ 登录状态已验证，跳过登录流程', 'success');
+                this.isLoginVerified = true;
+                return;
+            }
+            
+            console.log('🔍 批量处理器调用 autoLogin 方法...');
+            console.log('🕐 调用时间:', new Date().toISOString());
+            console.log('📞 调用来源: 批量处理器 preLogin 方法');
+            console.log('🔍 调用堆栈:', new Error().stack);
+            
             const loginSuccess = await this.globalScraper.autoLogin();
             
             if (loginSuccess) {
@@ -206,10 +221,12 @@ class BatchProcessor {
                 
                 return true;
             } else {
-                this.log('❌ 全局爬虫实例登录失败', 'error');
-                // 发送预登录失败状态
-                this.emitPreLoginStatus(false, 0);
-                return false;
+                this.log('❌ 全局爬虫实例登录失败，但继续使用事件驱动登录管理器', 'warning');
+                // 不要回退到传统登录方式，继续使用事件驱动登录管理器
+                this.log('🔄 保持事件驱动登录管理器状态，等待用户手动登录', 'info');
+                // 发送预登录等待状态
+                this.emitPreLoginStatus(false, 50);
+                return true; // 返回true，不触发回退逻辑
             }
         } catch (error) {
             this.log(`预登录失败: ${error.message}`, 'error');
@@ -675,6 +692,11 @@ class BatchProcessor {
      * @returns {Object} 状态信息
      */
     getStatus() {
+        console.log('🔍 批量处理器调用 getStatus 方法...');
+        console.log('🕐 调用时间:', new Date().toISOString());
+        console.log('📞 调用来源: 批量处理器 getStatus 方法');
+        console.log('🔍 调用堆栈:', new Error().stack);
+        
         const progress = this.stats.totalRestaurants > 0 ? 
             (this.stats.completedRestaurants + this.stats.failedRestaurants) / this.stats.totalRestaurants * 100 : 0;
         

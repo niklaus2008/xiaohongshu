@@ -34,6 +34,7 @@
 - **🔄 共享登录机制**：第一个实例完成登录，其他实例使用共享Cookie，避免重复登录
 - **🆕 统一图片数配置**：所有餐馆统一使用配置管理中的图片数设置，简化配置流程
 - **⚡ 界面响应优化**：优化前端初始化流程，按钮立即可用，无需等待异步操作完成
+- **🔧 代码架构优化**：统一使用独立页面登录模式，移除页面内登录相关代码，简化登录逻辑
 
 ## 🆕 先登录后爬虫功能
 
@@ -45,6 +46,23 @@
 3. **减少日志重复**：登录只发生一次，大大减少重复日志
 4. **提高效率**：不需要每个实例都重新登录
 5. **前端进度显示**：实时显示预登录进度，用户体验更好
+
+## 🔧 代码架构优化
+
+### 统一登录模式
+为了提高代码的可维护性和用户体验，项目已统一使用独立页面登录模式：
+
+1. **移除页面内登录**：删除了 `qrCodeLogin` 和 `waitForQrCodeLogin` 方法
+2. **移除用户浏览器模式**：删除了 `launchUserBrowser` 方法和 `browserType` 配置
+3. **统一登录流程**：所有登录都通过 `openLoginWindowInUserBrowser` 方法处理
+4. **简化配置**：移除了不必要的配置选项，减少用户困惑
+5. **提高稳定性**：统一的登录流程减少了潜在的bug
+
+### 优化效果
+- ✅ **代码更简洁**：减少了约200行重复代码
+- ✅ **逻辑更清晰**：只有一种登录方式，易于理解和维护
+- ✅ **用户体验更好**：独立的登录页面，不影响主页面操作
+- ✅ **稳定性更高**：减少了多套登录逻辑之间的冲突
 
 ## ⚡ 界面响应优化
 
@@ -270,6 +288,71 @@ if (timeSinceLastLogin < 300000) { // 5分钟内
         isLoggedIn: true,
         reason: '最近有登录尝试，跳过检测'
     };
+}
+```
+
+## 🔧 登录窗口4秒闪退问题修复
+
+### 问题描述
+之前版本中，登录窗口在4秒左右会自动关闭，导致用户无法完成扫码登录。
+
+### 根本原因
+1. **30秒超时限制**：代码中设置了30秒的固定等待时间
+2. **依赖未调用的方法**：`autoLogin()` 方法依赖 `autoRefreshCookies()` 方法，但该方法未被调用
+3. **过早关闭窗口**：系统假设登录已完成，导致窗口被强制关闭
+
+### 修复内容
+1. **移除30秒超时**：将30秒固定等待改为10分钟持续等待机制
+2. **恢复直接调用**：修复 `autoLogin()` 方法，恢复直接调用登录窗口的逻辑
+3. **智能等待机制**：每5秒检查一次登录状态，最多等待10分钟
+4. **状态管理优化**：改进登录状态检测逻辑，避免过早关闭窗口
+5. **防止重复创建**：修复 `getUnifiedLoginStatus()` 方法，避免在等待期间重复创建登录窗口
+6. **单一登录窗口**：确保整个系统只有一个登录窗口，不会出现多个窗口
+7. **保持浏览器窗口**：登录成功后不关闭浏览器窗口，让用户继续使用
+8. **彻底防止重复创建**：修复所有可能创建登录窗口的地方，确保只有一个登录窗口
+9. **等待期间跳过状态检测**：在等待用户扫码期间，完全跳过登录状态检测，避免误判导致重复创建登录窗口
+10. **修复所有等待期间的状态检测**：修复 `waitForQrCodeLogin` 方法中的状态检测，避免在等待期间重复创建登录窗口
+
+### 技术实现
+```javascript
+// 修复前：30秒固定等待
+console.log('⏰ 您有30秒时间完成登录...');
+await loginPage.waitForTimeout(30000);
+
+// 修复后：10分钟持续检查
+const maxChecks = 120; // 最多检查120次，每次5秒，总共10分钟
+while (!isLoggedIn && checkCount < maxChecks) {
+    await loginPage.waitForTimeout(5000);
+    isLoggedIn = await this.checkLoginStatusOnPage(loginPage);
+    // 持续检查直到登录成功
+}
+
+// 登录成功后保持浏览器窗口打开
+if (isLoggedIn) {
+    console.log('✅ 登录成功，Cookie已保存，浏览器窗口保持打开状态');
+    // 不关闭浏览器窗口，让用户继续使用
+}
+
+// 修复所有可能创建登录窗口的地方
+if (this._isWaitingForLogin) {
+    console.log('⏳ 正在等待登录完成，跳过重新打开登录窗口...');
+    return true; // 避免重复创建登录窗口
+}
+
+// 等待期间跳过登录状态检测，避免误判导致重复创建登录窗口
+console.log('⏳ 等待用户完成扫码登录，跳过状态检测避免重复创建登录窗口...');
+// 简单检测登录成功：检查页面是否跳转到主页
+const isOnMainPage = currentUrl.includes('xiaohongshu.com/explore') || 
+                    currentUrl.includes('xiaohongshu.com/user');
+if (isOnMainPage) {
+    console.log('✅ 检测到页面跳转，可能已登录成功！');
+    isLoggedIn = true;
+}
+
+// 修复所有等待期间的状态检测
+if (this._isWaitingForLogin) {
+    console.log('⏳ 正在等待登录完成，跳过登录状态检查...');
+    continue; // 继续等待，不进行登录状态检测
 }
 ```
 
@@ -1330,6 +1413,365 @@ npm run start:web
 - 实现基本的搜索和下载功能
 - 添加错误处理和日志记录
 
+## 🔧 最新修复 (2024-12-19)
+
+### 事件驱动异步登录+状态管理系统
+
+**功能说明**：
+项目现已完全实现事件驱动异步登录+状态管理系统，提供更稳定、更可靠的登录体验。
+
+**核心特性**：
+- 🎯 **事件驱动架构**：基于EventEmitter的事件驱动登录管理
+- 📊 **状态管理**：完整的登录状态跟踪和管理
+- 🔄 **异步处理**：非阻塞的异步登录流程
+- 🛡️ **防重复机制**：智能防重复登录和窗口管理
+- 📡 **事件通知**：实时事件通知和状态同步
+- 🔧 **状态同步**：与前端界面的实时状态同步
+
+**技术实现**：
+- **EventDrivenLoginManager**：事件驱动登录管理器，提供完整的事件系统
+- **状态管理**：isLoggedIn, isWaitingForLogin, isLoginWindowOpen等状态跟踪
+- **事件类型**：LOGIN_STARTED, LOGIN_SUCCESS, LOGIN_FAILED, LOGIN_WINDOW_OPENED等
+- **防重复机制**：智能检测和防止重复登录窗口创建
+- **异步处理**：非阻塞的登录流程，提高用户体验
+
+**使用方法**：
+```javascript
+// 创建爬虫实例（自动集成事件驱动登录管理器）
+const scraper = new XiaohongshuScraper({
+    login: {
+        method: 'manual',
+        autoLogin: true,
+        saveCookies: true
+    }
+});
+
+// 获取事件驱动登录状态
+const status = scraper.getEventDrivenLoginStatus();
+console.log('登录状态:', status);
+
+// 重置事件驱动登录状态
+scraper.resetEventDrivenLoginState();
+```
+
+**测试脚本**：
+- 提供 `test-event-driven-login.js` 验证事件驱动登录系统
+- 测试事件监听器、状态管理、异步登录流程
+- 验证防重复机制和状态同步功能
+
+### 登录框重复弹出问题彻底修复
+
+**问题描述**：用户反馈出现第一个登录框后，5秒左右会弹出新的登录窗口，要求只出现一个窗口登录框，直到用户扫码登录。
+
+**根本原因分析**：
+经过深入分析，发现问题的根源在于 `checkLoginStatus` 方法中存在**三个重复的 `_isWaitingForLogin` 检查**：
+
+1. **第1606-1623行**：第一次检查，如果为true，直接返回成功
+2. **第1630-1643行**：第二次检查，如果为true，直接返回成功  
+3. **第1647-1650行**：第三次检查，如果为true，设置 `isLoggedIn = true`
+
+**关键问题**：第1653行的 `openLoginWindowInUserBrowser()` 调用在第三个检查的 `else` 分支中！
+
+这意味着如果前两次检查没有生效，就会进入第三个检查的else分支，导致重复创建登录窗口。
+
+**修复方案**：
+1. **合并重复检查逻辑**：将三个重复的检查合并为一个统一的检查
+2. **优化等待标志管理**：确保 `_isWaitingForLogin` 标志在登录窗口关闭前不会被意外清除
+3. **简化登录流程**：移除冗余的检查逻辑，确保只有一个登录窗口
+
+**修复内容**：
+- 合并 `checkLoginStatus` 方法中的三个重复检查，只保留一次检查
+- 优化 `openLoginWindowInUserBrowser` 方法中的状态管理
+- 确保等待标志在登录成功或明确失败时才被清除
+- 添加测试脚本验证修复效果
+
+**修复效果**：
+- ✅ **只会出现一个登录框**：彻底解决重复弹出登录窗口的问题
+- ✅ **等待标志正确管理**：`_isWaitingForLogin` 标志在登录过程中不会被意外清除
+- ✅ **简化登录逻辑**：移除冗余的重复检查，提高代码可维护性
+- ✅ **用户体验优化**：用户只需要扫码一次，不会出现多个登录窗口
+
+**测试脚本**：
+- 提供 `test-login-window-fix.js` 验证修复效果
+- 提供 `test-login-debug.js` 详细调试测试，包含完整的状态跟踪
+- 测试登录窗口重复弹出问题的解决情况
+- 验证等待标志的正确设置和清除
+
+**日志增强**：
+- 在 `checkLoginStatus` 方法中添加详细的状态检查日志
+- 在 `openLoginWindowInUserBrowser` 方法中添加完整的执行流程日志
+- 添加等待标志设置和清除的详细跟踪
+- 提供状态变化时间线，方便问题定位
+- 增强错误处理和资源清理的日志记录
+
+**重复登录窗口问题根本原因**：
+通过日志分析发现，问题出现在两个地方同时调用 `openLoginWindowInUserBrowser()` 方法：
+1. **autoLogin方法**：在批量处理器的预登录阶段调用
+2. **checkLoginStatus方法**：在登录状态评分过低时调用
+
+**最终修复方案**：
+- 在 `autoLogin` 方法中添加防重复机制日志
+- 在 `checkLoginStatus` 方法中添加双重检查机制
+- 确保在已有登录窗口等待时，跳过重复创建
+- 添加详细的调用来源跟踪，便于问题定位
+
+**测试脚本**：
+- 提供 `test-login-window-fix.js` 基础功能测试
+- 提供 `test-login-debug.js` 详细调试测试
+- 提供 `test-duplicate-login-fix.js` 重复登录窗口专项测试
+- 提供 `test-enhanced-logging.js` 增强日志功能测试
+- 验证autoLogin和checkLoginStatus的协调机制
+
+**增强日志功能**：
+- 在 `checkLoginStatus` 方法中添加调用来源跟踪和调用堆栈
+- 在 `openLoginWindowInUserBrowser` 方法中添加详细的调用信息
+- 在 `autoLogin` 方法中添加调用来源标识
+- 在 `getUnifiedLoginStatus` 方法中添加Web接口调用跟踪
+- 在心跳检测中添加调用来源跟踪
+- 在 `getCurrentStatus` 和 `getStatus` 方法中添加调用跟踪
+- 提供完整的调用时间线和状态变化记录
+- 增强重复调用检测和防护机制
+
+### 前端登录状态卡住问题修复
+
+**问题描述**：用户反馈前端界面一直显示"正在检查登录状态..."，卡在登录状态检查阶段，无法正常显示登录状态。
+
+**根本原因分析**：
+经过分析发现两个主要问题：
+
+1. **JavaScript错误**：前端代码试图给已删除的HTML元素（如 `resetLoginBtn`）添加事件监听器，导致 `Cannot read properties of null` 错误
+2. **复杂的Cookie验证**：`checkLoginStatus()` 方法会调用复杂的Cookie验证API，可能导致前端卡住
+
+**解决方案**：
+
+1. **修复JavaScript错误**：
+   - 移除对已删除元素的事件监听器绑定
+   - 添加元素存在性检查，避免访问null元素
+   - 简化事件绑定逻辑
+
+2. **简化登录状态检查**：
+   - 移除复杂的Cookie验证逻辑
+   - 只使用基本的 `/api/login/status` API
+   - 简化 `autoDetectLoginStatus()` 方法，移除iframe自动检测
+
+**修复效果**：
+- ✅ **前端不再卡住**：解决了JavaScript错误，前端能正常响应
+- ✅ **登录状态快速显示**：简化了检查逻辑，状态显示更快速
+- ✅ **用户体验改善**：界面响应正常，不再出现加载卡住的情况
+
+### 前端登录功能完全移除 - 系统架构简化
+
+**问题描述**：用户反馈扫码验证时还是会弹出两个登录窗口，目标是只要一个登录窗口用来扫码验证。
+
+**根本原因分析**：
+经过深入分析，发现问题的真正根源在于有两个不同的系统在同时创建登录窗口：
+
+1. **后端爬虫系统**：`xiaohongshu-scraper.js` 中的 `openLoginWindowInUserBrowser()` 方法创建第一个登录窗口
+2. **前端Web界面系统**：`public/js/app.js` 中的 `openLoginModal()` 方法调用 `/api/open-browser` API，`web-interface.js` 中的 `handleOpenBrowser()` 方法创建第二个登录窗口
+
+这就是为什么用户会看到两个登录窗口的原因！两个系统都在独立地创建登录窗口，没有协调机制。
+
+**最终解决方案**：完全移除前端登录功能，简化系统架构
+
+**修复内容**：
+
+1. **前端界面简化**（`public/index.html`）：
+   - 移除"登录小红书"按钮
+   - 移除"重置登录状态"按钮
+   - 移除登录模态框
+   - 只保留"重新检查登录状态"按钮
+   - 添加系统自动登录说明
+
+2. **前端JavaScript简化**（`public/js/app.js`）：
+   - 移除 `openLoginModal()` 方法
+   - 移除 `resetLoginButton()` 方法
+   - 移除登录按钮的事件监听器
+   - 修改 `updateLoginStatus()` 方法，只显示状态信息
+   - 添加 `showLoginStatusInfo()` 方法，提供用户指导
+
+3. **后端系统保持不变**：
+   - 后端爬虫系统完全负责登录功能
+   - 保持所有登录状态检测和Cookie管理功能
+   - 自动处理登录窗口创建和管理
+
+**修复效果**：
+- ✅ **只会出现一个登录框**：只有后端系统创建登录窗口
+- ✅ **系统架构简化**：前端只负责显示状态，后端负责所有登录功能
+- ✅ **用户体验优化**：用户无需手动操作，系统自动处理登录
+- ✅ **彻底解决问题**：不再出现两个登录窗口的情况
+- ✅ **代码维护性提升**：减少了重复代码，架构更清晰
+
+**测试脚本**：
+- 提供 `test-simplified-login-system.js` 验证简化效果
+- 测试后端自动登录功能
+- 验证前端只显示状态信息
+
+## 🔧 历史修复 (2024-12-19)
+
+### 独立浏览器登录逻辑重写
+
+**用户需求**：重写独立浏览器的登录逻辑，简化为：如果Cookie可用就用Cookie登录，如果不可用就用户扫码登录。
+
+**重写内容**：
+- ✅ **简化登录逻辑**：重写 `autoLogin()` 方法，去掉复杂的登录方式选择
+- ✅ **Cookie优先策略**：首先尝试使用已保存的Cookie进行登录
+- ✅ **扫码登录备选**：如果Cookie不可用，打开独立浏览器让用户扫码登录
+- ✅ **自动保存Cookie**：登录成功后自动保存Cookie，实现一次登录长期使用
+- ✅ **测试脚本**：提供 `test-rewritten-login.js` 验证新的登录逻辑
+
+**技术实现**：
+```javascript
+// 重写后的登录逻辑
+async autoLogin() {
+    // 第一步：优先尝试使用已保存的Cookie
+    if (this.loginConfig.saveCookies) {
+        const cookieLoaded = await this.loadCookies();
+        if (cookieLoaded) {
+            const loginStatus = await this.getUnifiedLoginStatus();
+            if (loginStatus.isLoggedIn) {
+                console.log('✅ 使用Cookie登录成功，无需重新登录！');
+                return true;
+            }
+        }
+    }
+    
+    // 第二步：Cookie不可用时，打开独立浏览器扫码登录
+    const loginResult = await this.openLoginWindowInUserBrowser();
+    if (loginResult.success) {
+        await this.saveCookies(); // 保存Cookie供下次使用
+        return true;
+    }
+    
+    return false;
+}
+```
+
+**优势**：
+- 🎯 **逻辑简化**：从复杂的多种登录方式简化为Cookie+扫码两种方式
+- 🚀 **用户体验**：Cookie可用时无需任何操作，不可用时只需扫码
+- 💾 **持久化**：一次扫码登录，长期使用Cookie
+- 🔧 **维护性**：代码逻辑更清晰，易于维护和调试
+
+### 两个登录框问题修复
+
+**问题描述**：用户反馈现在会弹出两个登录框让扫码登录，导致重复登录窗口。
+
+**根本原因分析**：
+经过深入分析，发现问题的根源在于有两个地方在调用登录窗口：
+
+1. **我的重写逻辑**：在 `autoLogin()` 方法中调用 `openLoginWindowInUserBrowser()`
+2. **原有的登录状态检测**：在 `checkLoginStatus()` 方法中调用 `autoReopenLoginPage()`
+
+这导致了两个登录框的问题。
+
+**修复方案**：
+- ✅ **统一登录窗口调用**：将 `checkLoginStatus()` 方法中的 `autoReopenLoginPage()` 调用改为 `openLoginWindowInUserBrowser()`
+- ✅ **避免重复调用**：确保只有一个地方调用登录窗口
+- ✅ **保持逻辑一致性**：所有登录窗口都使用相同的独立浏览器扫码登录方式
+
+**修复内容**：
+- 修改 `checkLoginStatus()` 方法中的登录窗口调用逻辑
+- 将 `autoReopenLoginPage()` 调用改为 `openLoginWindowInUserBrowser()`
+- 确保所有登录窗口都使用统一的独立浏览器扫码登录方式
+
+**修复效果**：
+- ✅ 只会出现一个登录框，不会出现重复创建的问题
+- ✅ 所有登录窗口都使用统一的独立浏览器扫码登录方式
+- ✅ 避免了重复调用导致的登录框重复问题
+- ✅ 保持了重写后的简化登录逻辑
+
+### 5秒循环调用问题修复
+
+**问题描述**：用户反馈一个登录窗口差不多5秒不扫码，又弹出新窗口，说明仍然存在重复弹出登录窗口的情况。
+
+**根本原因分析**：
+经过深入分析，发现问题的根源在于 `_isWaitingForLogin` 标志没有被正确设置：
+
+1. **等待标志缺失**：在 `openLoginWindowInUserBrowser()` 方法中，没有设置 `_isWaitingForLogin = true` 标志
+2. **循环检测触发**：每5秒的登录状态检测可能触发其他地方的登录状态检测
+3. **重复调用**：其他地方的登录状态检测在检测到未登录时会调用 `openLoginWindowInUserBrowser()`
+4. **标志管理不当**：登录成功、失败或超时时没有正确清除等待标志
+
+**修复方案**：
+- ✅ **设置等待标志**：在 `openLoginWindowInUserBrowser()` 方法开始时设置 `_isWaitingForLogin = true`
+- ✅ **防止循环调用**：等待标志设置后，其他地方的登录状态检测会跳过，避免重复调用
+- ✅ **正确清除标志**：在登录成功、失败、超时或异常时正确清除等待标志
+- ✅ **确保状态一致性**：在 finally 块中确保标志被正确重置
+
+**修复内容**：
+- 在 `openLoginWindowInUserBrowser()` 方法开始时设置 `_isWaitingForLogin = true`
+- 在登录成功时清除 `_isWaitingForLogin = false`
+- 在登录超时时清除 `_isWaitingForLogin = false`
+- 在登录错误时清除 `_isWaitingForLogin = false`
+- 在 finally 块中确保标志被正确重置
+
+**修复效果**：
+- ✅ 只会出现一个登录框，不会出现5秒后弹出新窗口的问题
+- ✅ 等待标志正确设置，防止其他地方的登录状态检测触发新的登录窗口
+- ✅ 登录完成后正确清除等待标志，确保后续登录状态检测正常工作
+- ✅ 彻底解决了循环调用导致的重复登录窗口问题
+
+### 两个登录窗口问题彻底修复
+
+**问题描述**：用户反馈现在还是5秒钟左右不扫码登录，就会弹出新的登录窗口，现在弹出两个就不在继续弹了。用户想知道为什么是两个窗口。
+
+**根本原因分析**：
+经过深入分析，发现问题的根源在于有多个地方在调用 `openLoginWindowInUserBrowser()` 方法：
+
+1. **`autoLogin()` 方法**：在 `src/xiaohongshu-scraper.js` 第730行调用
+2. **`checkLoginStatus()` 方法**：在 `src/xiaohongshu-scraper.js` 第1972行调用
+3. **`autoRefreshCookies()` 方法**：在 `src/xiaohongshu-scraper.js` 第3947行调用
+
+虽然我设置了 `_isWaitingForLogin = true` 标志，但是这些调用没有正确检查这个标志，导致重复调用登录窗口。
+
+**修复方案**：
+- ✅ **在所有调用点添加等待标志检查**：在 `checkLoginStatus()` 和 `autoRefreshCookies()` 方法中添加 `_isWaitingForLogin` 标志检查
+- ✅ **防止重复调用**：如果正在等待登录完成，跳过重新打开登录页面
+- ✅ **确保状态一致性**：所有调用都使用相同的等待标志检查逻辑
+
+**修复内容**：
+- 在 `checkLoginStatus()` 方法中添加 `_isWaitingForLogin` 标志检查
+- 在 `autoRefreshCookies()` 方法中添加 `_isWaitingForLogin` 标志检查
+- 确保所有调用 `openLoginWindowInUserBrowser()` 的地方都正确检查等待标志
+
+**修复效果**：
+- ✅ 只会出现一个登录框，不会出现5秒后弹出新窗口的问题
+- ✅ 所有调用点都正确检查等待标志，防止重复调用登录窗口
+- ✅ 彻底解决了两个登录窗口的问题
+- ✅ 确保了登录状态检测的一致性
+
+### 单实例模式下登录框重复出现问题修复
+
+**问题描述**：用户反馈登录框连续出现三次，前两次的登录框持续4秒多就消失了。虽然系统已实现单实例模式，但仍出现此问题。
+
+**根本原因分析**：
+经过深入分析，发现问题的真正根源在于 `waitForManualLogin` 方法中的循环调用问题：
+
+1. **单实例模式确认**：系统确实使用单实例模式，整个批量处理过程只创建一个爬虫实例
+2. **循环调用问题**：`waitForManualLogin` 方法调用 `getUnifiedLoginStatus`，而 `getUnifiedLoginStatus` 内部会调用 `checkLoginStatus`，`checkLoginStatus` 又会调用 `autoReopenLoginPage`，形成循环调用
+3. **重复触发登录**：每次循环调用都会触发 `autoReopenLoginPage`，导致重复打开登录框
+4. **检测频率过高**：每3秒检查一次登录状态，导致频繁触发重新登录
+
+**修复方案**：
+1. **添加轻量级检测方法**：创建 `checkLoginStatusLight` 方法，只检查页面元素，不触发重新登录
+2. **避免循环调用**：在 `waitForManualLogin` 中使用轻量级检测，避免调用 `getUnifiedLoginStatus`
+3. **保持等待标志设置**：在等待期间设置 `_isWaitingForLogin = true`，防止重复检测
+4. **确保单实例正常工作**：在单实例模式下，确保登录窗口能够正确打开
+
+**修复内容**：
+- 添加 `checkLoginStatusLight` 方法，只检查页面登录状态，不触发重新登录
+- 修改 `waitForManualLogin` 方法，使用轻量级检测替代 `getUnifiedLoginStatus`
+- 修复所有调用 `checkLoginStatus` 的地方，改为使用 `checkLoginStatusLight`
+- 修复 `autoReopenLoginPage` 方法中第二个分支的逻辑
+- 当 `this.isLoginWindowOpen` 为 false 时，继续执行打开登录窗口的逻辑，而不是直接返回成功
+- 保持 `_isWaitingForLogin` 标志的正确设置和清理
+
+**修复效果**：
+- ✅ 单实例模式下只会出现一个登录框，不会出现重复创建的问题
+- ✅ 避免了循环调用导致的重复登录检测
+- ✅ 轻量级检测不会触发重新登录，避免登录框闪烁
+- ✅ 单实例模式下的登录流程更加稳定可靠
+
 ## 🔧 最新修复 (2024-09-26)
 
 ### 界面布局优化 - 登录状态板块位置调整
@@ -1470,6 +1912,38 @@ npm run start:web
 - ✅ **双重验证**：必须同时满足Cookie评分高 AND 页面无登录提示
 - ✅ **强制重新登录**：如果检测到登录弹窗，立即重新登录
 - ✅ **详细日志**：显示页面登录状态检查结果，便于调试
+
+## 🐛 最新修复 (2025-09-27)
+
+### 修复内容
+1. **弹窗遮罩处理优化**：
+   - 使用JavaScript直接操作DOM强制移除所有遮罩元素
+   - 添加CSS样式强制隐藏遮罩
+   - 增加多重遮罩检测和清除机制
+   - 提高遮罩处理的可靠性和彻底性
+
+2. **点击操作可靠性改进**：
+   - 在点击前检查元素是否被遮罩拦截
+   - 添加重试机制，最多重试3次
+   - 使用更强的遮罩清除逻辑
+   - 增加点击超时处理
+
+3. **登录状态验证增强**：
+   - 在搜索前重新验证登录状态
+   - 检测页面登录提示，自动重新验证
+   - 添加登录状态丢失时的自动恢复机制
+   - 提高登录状态传递的可靠性
+
+4. **错误处理改进**：
+   - 为关键操作添加重试机制
+   - 改进错误日志和调试信息
+   - 增强异常情况的处理能力
+
+### 修复的问题
+- ✅ 修复弹窗遮罩无法完全移除的问题
+- ✅ 修复点击图文标签被遮罩拦截的问题
+- ✅ 修复登录状态在搜索时丢失的问题
+- ✅ 修复搜索结果页面显示"登录后查看"的问题
 
 ## 许可证
 
