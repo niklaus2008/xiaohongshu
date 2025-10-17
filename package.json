@@ -9,6 +9,8 @@
     "start:web": "node src/web-interface.js",
     "test": "node test.js",
     "test:watermark": "node test-watermark-removal.js",
+    "test:ai": "node test-ai-integration.js",
+    "test:review": "node test-review-generation.js",
     "dev": "node --inspect example.js",
     "dev:login": "node --inspect example-with-login.js",
     "dev:web": "nodemon src/web-interface.js"

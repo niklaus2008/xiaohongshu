@@ -18,6 +18,7 @@ const { BatchProcessor } = require('./batch-processor');
 const { getLogger } = require('./logger');
 const CookieValidator = require('./cookie-validator');
 const globalBrowserManager = require('./global-browser-manager');
+const AIService = require('./ai-service');
 
 class WebInterface {
     
@@ -197,6 +198,7 @@ class WebInterface {
         this.app.post('/api/login/reset', this.handleResetLoginWindow.bind(this));
         this.app.post('/api/open-browser', this.handleOpenBrowser.bind(this));
         this.app.post('/api/login/check-cross-window', this.handleCheckCrossWindowLogin.bind(this));
+        this.app.post('/api/ai/test', this.handleAiTest.bind(this));
         
         // 错误处理中间件
         this.app.use((err, req, res, next) => {
@@ -248,7 +250,7 @@ class WebInterface {
      */
     async handleStart(req, res) {
         try {
-            const { restaurants, outputPath, options } = req.body;
+            const { restaurants, outputPath, options, aiConfig } = req.body;
             
             // 验证输入
             if (!restaurants || !Array.isArray(restaurants) || restaurants.length === 0) {
@@ -286,6 +288,7 @@ class WebInterface {
                 restaurants,
                 outputPath,
                 options: options || {},
+                aiConfig: aiConfig || null, // 传递AI配置
                 io: this.io,
                 logger: this.logger, // 传递日志管理器
                 webInterface: this // 传递Web界面实例
@@ -1389,6 +1392,45 @@ class WebInterface {
             console.error('❌ 关闭服务器失败:', error);
             this.logger.sendErrorLog('关闭服务器失败', error);
             process.exit(1);
+        }
+    }
+
+    /**
+     * 处理AI连接测试请求
+     * @param {Object} req 请求对象
+     * @param {Object} res 响应对象
+     */
+    async handleAiTest(req, res) {
+        try {
+            const { apiKey, model, ...otherConfig } = req.body;
+            
+            if (!apiKey) {
+                return res.json({
+                    success: false,
+                    message: '请提供GLM API密钥'
+                });
+            }
+
+            // 创建AI服务实例进行测试
+            const aiService = new AIService({
+                enabled: true,
+                apiKey: apiKey,
+                model: model || 'glm-4-flash',
+                ...otherConfig
+            });
+
+            // 测试连接
+            const result = await aiService.testConnection();
+            
+            res.json(result);
+
+        } catch (error) {
+            console.error('AI测试失败:', error);
+            res.json({
+                success: false,
+                message: 'AI连接测试失败',
+                error: error.message
+            });
         }
     }
 }

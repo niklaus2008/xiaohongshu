@@ -36,6 +36,7 @@ class BatchProcessor {
         this.io = options.io;
         this.logger = options.logger; // 日志管理器
         this.webInterface = options.webInterface; // Web界面实例
+        this.aiConfig = options.aiConfig; // AI配置
         
         // 状态管理
         this._isRunning = false;
@@ -175,6 +176,7 @@ class BatchProcessor {
                     saveCookies: true,
                     cookieFile: './cookies.json'
                 },
+                ai: this.aiConfig,
                 logCallback: (message, level) => {
                     this.log(message, level);
                 }

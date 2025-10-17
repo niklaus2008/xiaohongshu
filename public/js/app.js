@@ -216,6 +216,7 @@ class XiaohongshuDownloaderApp {
             this.checkLoginStatusFromModal();
         });
         
+        
         // 添加调试信息显示
         this.addDebugInfo();
     }
@@ -632,7 +633,8 @@ class XiaohongshuDownloaderApp {
                 body: JSON.stringify({
                     restaurants: this.restaurants,
                     outputPath,
-                    options
+                    options,
+                    aiConfig: this.getAiConfig()
                 })
             });
             
@@ -1729,6 +1731,155 @@ class XiaohongshuDownloaderApp {
         
         // 确保前端状态完全更新
         this.updateStatusUI();
+    }
+
+    /**
+     * 切换AI配置显示
+     */
+    toggleAiConfig() {
+        const aiEnabled = document.getElementById('aiEnabled').checked;
+        const aiConfigArea = document.getElementById('aiConfigArea');
+        
+        if (aiEnabled) {
+            aiConfigArea.style.display = 'block';
+        } else {
+            aiConfigArea.style.display = 'none';
+        }
+    }
+
+    /**
+     * 测试AI连接
+     */
+    async testAiConnection() {
+        const testBtn = document.getElementById('testAiBtn');
+        const originalText = testBtn.innerHTML;
+        
+        try {
+            testBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>测试中...';
+            testBtn.disabled = true;
+            
+            const aiConfig = this.getAiConfig();
+            if (!aiConfig.apiKey) {
+                throw new Error('请先输入GLM API密钥');
+            }
+            
+            const response = await fetch('/api/ai/test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(aiConfig)
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                this.addLog('✅ AI连接测试成功', 'success');
+                this.showAlert('AI连接测试成功！', 'success');
+            } else {
+                throw new Error(result.message || 'AI连接测试失败');
+            }
+            
+        } catch (error) {
+            this.addLog(`❌ AI连接测试失败: ${error.message}`, 'error');
+            this.showAlert(`AI连接测试失败: ${error.message}`, 'error');
+        } finally {
+            testBtn.innerHTML = originalText;
+            testBtn.disabled = false;
+        }
+    }
+
+    /**
+     * 获取AI配置
+     * @returns {Object} AI配置对象
+     */
+    getAiConfig() {
+        return {
+            enabled: true,
+            apiKey: '3134eeac071543cda4d2a9f7a82a38af.Uz7CREy8nd3HVMC2',
+            model: 'glm-4-flash',
+            analyzeImages: true,
+            generateDescription: true,
+            saveAnalysis: true,
+            generateReview: true, // 新增：生成评语功能
+            reviewPrompt: `# 角色
+你是一位普通的美食爱好者，不是专业的博主。你写评价的目的是为了客观记录自己的用餐感受，并给其他食客提供真实的参考。你的语言风格朴实、真诚，会注重描述事实和细节，而不是堆砌形容词。
+
+# 任务
+根据用户提供的店家信息，创作一篇约300字的、风格真实的五星好评笔记。评价应听起来像一个细心的普通顾客写的，可以有褒奖，但要说出具体好在哪里。
+
+# 风格与要求
+1.  **语气自然，避免夸张**:
+    * **核心要求**：完全避免使用"YYDS"、"绝绝子"、"好吃到哭"这类过于夸张的网络热词。
+    * 请使用更生活化的正面词汇，例如："味道不错"、"印象挺深"、"确实可以"、"值得一试"、"没有踩雷"、"比预想的好"。
+
+2.  **描述具体，少用形容词**:
+    * 不要只说"好吃"，要说出"怎么个好吃法"。
+    * **鼓励的描述方式**：多描述口感、食材和做法带来的感受。例如，用"鱼肉很嫩，筷子一夹就下来了，而且没什么刺"来代替"鱼肉入口即化"；用"酱汁是咸甜口的，很下饭"来代替"酱汁浓郁美味"。
+
+3.  **内容有侧重，而非全部吹捧**:
+    * 可以重点夸一两道最出彩的菜，其他菜品可以用"也还不错"、"中规中矩"等词语带过，这样更显真实。
+    * 可以在夸赞菜品的同时，提及一些中性的细节，如"店里人挺多的，饭点可能要等位"、"价格不算便宜，但用料确实不错"等，让评价更立体。
+
+4.  **结构与格式**: 依然保留大众点评的格式要求。
+    * **标题**: 简单直接，可以加上Emoji，但不要过于浮夸。
+    * **正文**: 先说整体感受，再分点说几道菜，最后简单总结。
+    * **结尾标签**: 按要求加上活动标签和店家关键词。
+
+请根据提供的餐馆图片分析结果，生成一篇真实的五星好评笔记。`
+        };
+    }
+
+    /**
+     * 设置AI配置
+     * @param {Object} config AI配置对象
+     */
+    setAiConfig(config) {
+        if (config.enabled !== undefined) {
+            document.getElementById('aiEnabled').checked = config.enabled;
+            this.toggleAiConfig();
+        }
+        if (config.apiKey !== undefined) {
+            document.getElementById('aiApiKey').value = config.apiKey;
+        }
+        if (config.model !== undefined) {
+            document.getElementById('aiModel').value = config.model;
+        }
+        if (config.analyzeImages !== undefined) {
+            document.getElementById('aiAnalyzeImages').checked = config.analyzeImages;
+        }
+        if (config.generateDescription !== undefined) {
+            document.getElementById('aiGenerateDescription').checked = config.generateDescription;
+        }
+        if (config.saveAnalysis !== undefined) {
+            document.getElementById('aiSaveAnalysis').checked = config.saveAnalysis;
+        }
+    }
+
+    /**
+     * 显示警告信息
+     * @param {string} message 消息内容
+     * @param {string} type 消息类型
+     */
+    showAlert(message, type = 'info') {
+        // 创建警告框
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type === 'error' ? 'danger' : type} alert-dismissible fade show`;
+        alertDiv.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        
+        // 插入到页面顶部
+        const container = document.querySelector('.container');
+        container.insertBefore(alertDiv, container.firstChild);
+        
+        // 3秒后自动消失
+        setTimeout(() => {
+            if (alertDiv.parentNode) {
+                alertDiv.remove();
+            }
+        }, 3000);
     }
 }
 

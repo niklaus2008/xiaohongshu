@@ -13,6 +13,7 @@ const { URL } = require('url');
 const sharp = require('sharp');
 const globalLoginManager = require('./global-login-manager');
 const globalBrowserManager = require('./global-browser-manager');
+const AIService = require('./ai-service');
 
     /**
  * 小红书餐馆图片下载器类
@@ -44,6 +45,13 @@ class XiaohongshuScraper {
         
         // 登录配置
         this.loginConfig = options.login || null;
+        
+        // AI服务配置
+        this.aiConfig = options.ai || null;
+        this.aiService = null;
+        if (this.aiConfig) {
+            this.aiService = new AIService(this.aiConfig);
+        }
         
         this.browser = null;
         this.page = null;
@@ -553,8 +561,47 @@ class XiaohongshuScraper {
             
             console.log(`📋 步骤 7/8: 正在处理图片（去水印、优化）...`);
             console.log(`✅ 步骤 7/8: 图片处理完成`);
-            console.log(`📋 步骤 8/8: 正在保存结果...`);
-            console.log(`✅ 步骤 8/8: 餐馆 "${restaurantName}" 处理完成！`);
+            
+            // AI分析（如果启用）
+            let aiAnalysisResult = null;
+            if (this.aiService && this.aiService.isAvailable() && downloadResults.downloadedCount > 0) {
+                console.log(`🤖 步骤 8/9: 开始AI智能分析...`);
+                const aiStartTime = Date.now();
+                try {
+                    const restaurantPath = path.join(this.config.downloadPath, restaurantName);
+                    aiAnalysisResult = await this.aiService.analyzeRestaurantImages(restaurantName, restaurantPath, location);
+                    const aiTime = Date.now() - aiStartTime;
+                    if (aiAnalysisResult.success) {
+                        console.log(`✅ 步骤 8/9: AI分析完成 (耗时: ${aiTime}ms)`);
+                        console.log(`📊 AI分析结果: 分析了${aiAnalysisResult.imageCount}张图片`);
+                        
+                        // 保存评语到文件
+                        if (aiAnalysisResult.review) {
+                            const reviewPath = path.join(this.config.downloadPath, restaurantName, '评语.md');
+                            try {
+                                await fs.writeFile(reviewPath, aiAnalysisResult.review, 'utf8');
+                                console.log(`📝 评语已保存: ${reviewPath}`);
+                            } catch (error) {
+                                console.log(`⚠️ 保存评语失败: ${error.message}`);
+                            }
+                        }
+                    } else {
+                        console.log(`⚠️ 步骤 8/9: AI分析失败: ${aiAnalysisResult.error}`);
+                    }
+                } catch (error) {
+                    console.log(`❌ 步骤 8/9: AI分析出错: ${error.message}`);
+                    aiAnalysisResult = {
+                        success: false,
+                        error: error.message,
+                        restaurantName: restaurantName
+                    };
+                }
+            } else {
+                console.log(`📋 步骤 8/8: 跳过AI分析 (未启用或无可分析图片)`);
+            }
+            
+            console.log(`📋 步骤 9/9: 正在保存结果...`);
+            console.log(`✅ 步骤 9/9: 餐馆 "${restaurantName}" 处理完成！`);
             
             const totalTime = Date.now() - startTime;
             console.log(`⏱️ 总处理时间: ${totalTime}ms`);
@@ -566,6 +613,7 @@ class XiaohongshuScraper {
                 totalFound: imageUrls.length,
                 downloadedCount: downloadResults.downloadedCount,
                 failedCount: downloadResults.failedCount,
+                aiAnalysis: aiAnalysisResult,
                 errors: this.errors
             };
 
