@@ -4,6 +4,58 @@
 
 这是一个基于Playwright的自动化工具，可以根据餐馆名称和地点信息，从小红书上搜索并下载对应餐馆的图片。现在支持**Web图形界面**，让您可以通过直观的界面轻松管理批量下载任务。
 
+## 📁 项目目录结构
+
+```
+xiaohongshu/
+├── src/                    # 源代码目录
+│   ├── ai-service.js       # AI智能分析服务
+│   ├── batch-processor.js  # 批量处理器
+│   ├── xiaohongshu-scraper.js # 小红书爬虫核心
+│   └── ...                 # 其他核心模块
+├── public/                 # Web界面静态文件
+│   ├── index.html         # 主页面
+│   ├── css/               # 样式文件
+│   └── js/                # 前端JavaScript
+├── tests/                 # 测试文件目录
+│   ├── debug/             # 调试相关测试
+│   ├── examples/           # 示例文件
+│   └── test-*.js          # 各种测试脚本
+├── docs/                   # 文档目录
+│   ├── *.md               # 说明文档
+│   └── *.html             # HTML文档
+├── scripts/                # 脚本工具目录
+│   ├── tools/             # 工具脚本
+│   └── *.js               # 各种脚本文件
+├── data/                   # 数据文件目录
+│   ├── cookies.json       # Cookie存储
+│   └── test-cookies.json  # 测试Cookie
+├── logs/                   # 日志文件目录
+│   └── service.log        # 服务日志
+├── temp/                   # 临时文件目录
+│   ├── downloads/         # 下载的图片
+│   └── test-*/            # 各种测试下载目录
+├── ai-analysis/            # AI分析结果目录
+├── browser-data/           # 浏览器数据目录
+├── config/                 # 配置文件目录
+├── package.json            # 项目依赖配置
+├── config.template.json    # 配置模板
+└── README.md               # 项目说明文档
+```
+
+### 目录说明
+
+- **src/**: 核心源代码，包含爬虫、AI分析、Web界面等主要功能模块
+- **public/**: Web界面的静态文件，包括HTML、CSS、JavaScript
+- **tests/**: 所有测试相关文件，包括单元测试、集成测试、示例代码
+- **docs/**: 项目文档，包括使用指南、技术说明、故障排除等
+- **scripts/**: 工具脚本，包括修复脚本、检查脚本、工具脚本等
+- **data/**: 数据文件，包括Cookie存储、配置文件等
+- **logs/**: 日志文件，记录系统运行状态和错误信息
+- **temp/**: 临时文件，包括下载的图片、测试数据等
+- **ai-analysis/**: AI分析结果，保存智能分析生成的评语和描述
+- **browser-data/**: 浏览器数据，包括用户数据、缓存、Cookie等
+
 ## 功能特点
 
 ### 🖥️ Web图形界面
