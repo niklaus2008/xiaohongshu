@@ -10,6 +10,9 @@ browser-data/*
 downloads/*
 test-downloads/*
 
+# AI分析结果文件
+ai-analysis/*
+
 cursorindexingignore/*
 
 
