@@ -4,6 +4,7 @@
  */
 
 const GLMClient = require('./glm-client');
+const RestaurantResearcher = require('./restaurant-research');
 const fs = require('fs-extra');
 const path = require('path');
 
@@ -26,6 +27,8 @@ class AIService {
             apiBaseUrl: this.config.apiBaseUrl,
             model: this.config.model
         });
+
+        this.restaurantResearcher = new RestaurantResearcher();
 
         this.isEnabled = this.config.enabled && this.glmClient.isConfigured();
         
@@ -77,6 +80,11 @@ class AIService {
 
             console.log(`📸 找到 ${imageFiles.length} 张图片，开始AI分析`);
 
+            // 研究餐馆特色菜信息
+            console.log(`🔍 研究餐馆特色菜: ${restaurantName}`);
+            const specialtyResult = await this.restaurantResearcher.getRestaurantSpecialties(restaurantName, location);
+            const specialties = specialtyResult.success ? specialtyResult.specialties : [];
+
             // 分析图片
             const analysisResults = await this.glmClient.analyzeImages(
                 imageFiles,
@@ -94,15 +102,22 @@ class AIService {
                 description = descriptionResult.success ? descriptionResult.description : null;
             }
 
-            // 生成餐馆评语
+            // 生成餐馆评语（结合特色菜信息）
             let review = null;
             if (this.config.generateReview) {
                 console.log(`📝 生成餐馆评语: ${restaurantName}`);
+                
+                // 构建包含特色菜信息的提示词
+                let enhancedPrompt = this.config.reviewPrompt;
+                if (specialties.length > 0) {
+                    enhancedPrompt += `\n\n**特色菜信息**: 该餐馆的招牌菜包括：${specialties.join('、')}。请在评语中重点描述这些特色菜，结合图片分析结果写出更真实的评价。`;
+                }
+                
                 const reviewResult = await this.glmClient.generateRestaurantReview(
                     analysisResults,
                     restaurantName,
                     location,
-                    this.config.reviewPrompt
+                    enhancedPrompt
                 );
                 review = reviewResult.success ? reviewResult.review : null;
             }
@@ -110,8 +125,10 @@ class AIService {
             // 保存分析结果
             const result = {
                 restaurantName: restaurantName,
+                location: location,
                 timestamp: new Date().toISOString(),
                 imageCount: imageFiles.length,
+                specialties: specialties,
                 analysisResults: analysisResults,
                 description: description,
                 review: review,

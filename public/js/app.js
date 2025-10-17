@@ -256,8 +256,8 @@ class XiaohongshuDownloaderApp {
         // 统一使用全局配置的图片数
         const maxImages = parseInt(document.getElementById('maxImages').value) || 10;
         
-        if (!name || !location) {
-            this.showError('请填写餐馆名称和地点');
+        if (!name) {
+            this.showError('请填写餐馆名称');
             return;
         }
         
@@ -321,7 +321,7 @@ class XiaohongshuDownloaderApp {
                         <div class="restaurant-name">${this.escapeHtml(restaurant.name)}</div>
                         <div class="restaurant-location">
                             <i class="fas fa-map-marker-alt me-1"></i>
-                            ${this.escapeHtml(restaurant.location)}
+                            ${restaurant.location ? this.escapeHtml(restaurant.location) : '未设置地点'}
                         </div>
                         <div class="restaurant-max-images">
                             <i class="fas fa-images me-1"></i>
@@ -388,21 +388,21 @@ class XiaohongshuDownloaderApp {
                 
                 // 验证每个餐馆数据的完整性
                 const validRestaurants = importedRestaurants.filter(restaurant => {
-                    if (!restaurant || typeof restaurant.name !== 'string' || typeof restaurant.location !== 'string') {
+                    if (!restaurant || typeof restaurant.name !== 'string') {
                         return false;
                     }
                     
                     // 更彻底的字符串清理：清理所有类型的空白字符
                     const cleanName = restaurant.name.replace(/[\r\n\t\s]+/g, ' ').trim();
-                    const cleanLocation = restaurant.location.replace(/[\r\n\t\s]+/g, ' ').trim();
+                    const cleanLocation = restaurant.location ? restaurant.location.replace(/[\r\n\t\s]+/g, ' ').trim() : '';
                     
                     this.addLog(`验证餐馆数据：名称="${cleanName}", 地点="${cleanLocation}"`, 'debug');
                     
-                    return cleanName !== '' && cleanLocation !== '';
+                    return cleanName !== '';
                 });
                 
                 if (validRestaurants.length === 0) {
-                    throw new Error('导入的数据中没有有效的餐馆信息（需要包含餐馆名称和地点）');
+                    throw new Error('导入的数据中没有有效的餐馆信息（需要包含餐馆名称）');
                 }
                 
                 if (validRestaurants.length < importedRestaurants.length) {
@@ -419,7 +419,7 @@ class XiaohongshuDownloaderApp {
                 // 清理并添加新导入的餐馆
                 const cleanedRestaurants = validRestaurants.map(restaurant => ({
                     name: restaurant.name.replace(/[\r\n\t\s]+/g, ' ').trim(),
-                    location: restaurant.location.replace(/[\r\n\t\s]+/g, ' ').trim()
+                    location: restaurant.location ? restaurant.location.replace(/[\r\n\t\s]+/g, ' ').trim() : ''
                     // 移除maxImages，统一使用全局配置
                 }));
                 
@@ -500,23 +500,23 @@ class XiaohongshuDownloaderApp {
             
             this.addLog(`解析结果：${JSON.stringify(parts)}`, 'debug');
             
-            if (parts.length < 2) {
-                errors.push(`第${i + 1}行格式不正确：缺少地点信息。正确格式：餐馆名称,地点,下载的图片数(可选)`);
+            if (parts.length < 1) {
+                errors.push(`第${i + 1}行格式不正确：缺少餐馆名称。正确格式：餐馆名称,地点(可选),下载的图片数(可选)`);
                 continue;
             }
             
-            if (!parts[0] || !parts[1]) {
-                errors.push(`第${i + 1}行数据不完整：餐馆名称和地点不能为空`);
+            if (!parts[0]) {
+                errors.push(`第${i + 1}行数据不完整：餐馆名称不能为空`);
                 continue;
             }
             
             const restaurant = {
                 name: parts[0],
-                location: parts[1]
+                location: parts[1] || '' // 地点可以为空
                 // 移除maxImages，统一使用全局配置
             };
             
-            this.addLog(`成功解析餐馆：${restaurant.name} - ${restaurant.location}`, 'success');
+            this.addLog(`成功解析餐馆：${restaurant.name}${restaurant.location ? ` - ${restaurant.location}` : ' (未设置地点)'}`, 'success');
             restaurants.push(restaurant);
         }
         
@@ -535,41 +535,16 @@ class XiaohongshuDownloaderApp {
      * @returns {string} 清理后的CSV内容
      */
     cleanCSVContent(content) {
-        // 将跨行的数据合并为单行
-        // 如果一行不以逗号结尾，说明数据跨行了，需要合并到下一行
-        const lines = content.split(/\r?\n|\r/);
-        const mergedLines = [];
-        let currentLine = '';
+        // 简化逻辑：直接按行分割，不进行跨行合并
+        // 因为大多数CSV文件都是标准格式，不需要复杂的跨行处理
+        const lines = content.split(/\r?\n|\r/).filter(line => line.trim());
         
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
-            
-            currentLine += line;
-            
-            // 检查是否是一行完整的数据（以数字结尾，表示有图片数量）
-            // 或者以地点信息结尾（不包含逗号，说明是最后一部分）
-            if (currentLine.match(/,\d+\s*$/) || 
-                (currentLine.split(',').length >= 2 && !currentLine.endsWith(','))) {
-                mergedLines.push(currentLine);
-                currentLine = '';
-            } else {
-                // 如果数据不完整，继续合并到下一行
-                currentLine += ' ';
-            }
-        }
-        
-        // 处理最后一行
-        if (currentLine.trim()) {
-            mergedLines.push(currentLine);
-        }
-        
-        this.addLog(`CSV内容清理：${lines.length}行 -> ${mergedLines.length}行`, 'debug');
-        mergedLines.forEach((line, index) => {
-            this.addLog(`合并后第${index + 1}行：${line}`, 'debug');
+        this.addLog(`CSV内容清理：${lines.length}行数据`, 'debug');
+        lines.forEach((line, index) => {
+            this.addLog(`第${index + 1}行：${line}`, 'debug');
         });
         
-        return mergedLines.join('\n');
+        return lines.join('\n');
     }
 
     /**
@@ -830,7 +805,7 @@ class XiaohongshuDownloaderApp {
             container.innerHTML = this.restaurants.map((restaurant, index) => `
                 <div class="restaurant-progress-item">
                     <div class="restaurant-info">
-                        <div class="restaurant-name">${this.escapeHtml(restaurant.name)} (${this.escapeHtml(restaurant.location)})</div>
+                        <div class="restaurant-name">${this.escapeHtml(restaurant.name)} ${restaurant.location ? `(${this.escapeHtml(restaurant.location)})` : '(未设置地点)'}</div>
                     </div>
                     <div class="restaurant-progress">
                         <div class="progress">
@@ -881,7 +856,7 @@ class XiaohongshuDownloaderApp {
             return `
                 <div class="restaurant-progress-item">
                     <div class="restaurant-info">
-                        <div class="restaurant-name">${this.escapeHtml(restaurant.name)} (${this.escapeHtml(restaurant.location)})</div>
+                        <div class="restaurant-name">${this.escapeHtml(restaurant.name)} ${restaurant.location ? `(${this.escapeHtml(restaurant.location)})` : '(未设置地点)'}</div>
                     </div>
                     <div class="restaurant-progress">
                         <div class="progress">
@@ -1824,7 +1799,17 @@ class XiaohongshuDownloaderApp {
 4.  **结构与格式**: 依然保留大众点评的格式要求。
     * **标题**: 简单直接，可以加上Emoji，但不要过于浮夸。
     * **正文**: 先说整体感受，再分点说几道菜，最后简单总结。
-    * **结尾标签**: 按要求加上活动标签和店家关键词。
+    * **结尾标签**: 必须包含以下活动标签：#创作者赏金计划 #0元玩转这座城 #城市向导官# 优质创作者赏金计划，然后加上店家关键词。
+
+5.  **避免重复语句**:
+    * **严格禁止**使用以下固定语句："店里人挺多的，饭点可能要等位，价格不算便宜，但用料确实不错"。
+    * 每次生成评语时，必须使用完全不同的表达方式和词汇。
+    * 可以变化的中性描述：如"环境不错"、"服务态度好"、"性价比还可以"、"值得推荐"、"位置方便"、"装修有特色"、"服务周到"等。
+    * 如果必须提及类似内容，请用完全不同的表达方式，如"人气很旺"、"环境舒适"、"价格合理"、"食材新鲜"等。
+
+6.  **结合特色菜信息**:
+    * 如果提供了店家的特色菜信息，要结合图片分析结果，重点描述这些特色菜。
+    * 将网上查到的特色菜与图片中看到的菜品相结合，写出更真实的评价。
 
 请根据提供的餐馆图片分析结果，生成一篇真实的五星好评笔记。`
         };
