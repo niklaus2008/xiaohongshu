@@ -1,18 +1,16 @@
 /**
- * 评语生成功能测试脚本
- * 测试GLM-4.5-Flash生成餐馆评语的功能
+ * 测试评语格式修复效果
+ * 验证生成的评语不再包含"标题:"、"正文:"、"结尾标签:"等格式标识词
  */
 
-const GLMClient = require('./src/glm-client');
-const fs = require('fs-extra');
-const path = require('path');
+const GLMClient = require('../src/glm-client');
 
-async function testReviewGeneration() {
-    console.log('📝 开始测试评语生成功能...\n');
+async function testReviewFormatFix() {
+    console.log('🧪 开始测试评语格式修复效果...\n');
 
     // 创建GLM客户端
     const glmClient = new GLMClient({
-        apiKey: '3134eeac071543cda4d2a9f7a82a38af.Uz7CREy8nd3HVMC2',
+        apiKey: process.env.GLM_API_KEY || '3134eeac071543cda4d2a9f7a82a38af.Uz7CREy8nd3HVMC2',
         model: 'glm-4-flash'
     });
 
@@ -20,22 +18,22 @@ async function testReviewGeneration() {
     const mockAnalysisResults = [
         {
             success: true,
-            analysis: '这是一张精美的川菜图片，可以看到红油满满的宫保鸡丁，鸡肉嫩滑，花生米酥脆，配菜丰富，色泽诱人。整体摆盘精致，体现了川菜的麻辣特色。',
-            imagePath: '/test/川菜1.jpg'
+            analysis: '这是一张宫保鸡丁的图片，可以看到鸡肉块、花生米、辣椒等食材，色泽红亮，看起来很有食欲。',
+            imagePath: '/test/宫保鸡丁.jpg'
         },
         {
             success: true,
-            analysis: '这是一张餐厅环境图片，可以看到古色古香的装修风格，木质桌椅，暖黄色灯光，营造出温馨的用餐氛围。墙上挂着传统字画，体现了中式餐厅的文化底蕴。',
-            imagePath: '/test/环境1.jpg'
+            analysis: '这是一张麻婆豆腐的图片，豆腐嫩滑，红油汤底浓郁，配菜丰富，看起来麻辣鲜香。',
+            imagePath: '/test/麻婆豆腐.jpg'
         },
         {
             success: true,
-            analysis: '这是一张招牌菜图片，可以看到麻辣香锅，食材丰富多样，包括土豆、藕片、豆皮、肉片等，红油汤底浓郁，配菜新鲜，看起来很有食欲。',
-            imagePath: '/test/招牌菜1.jpg'
+            analysis: '这是一张水煮鱼的图片，鱼片嫩滑，配菜有豆芽、土豆片等，红油汤底看起来很诱人。',
+            imagePath: '/test/水煮鱼.jpg'
         }
     ];
 
-    // 评语生成提示词
+    // 更新后的评语生成提示词（不包含格式标识词）
     const reviewPrompt = `# 角色
 你是一位普通的美食爱好者，不是专业的博主。你写评价的目的是为了客观记录自己的用餐感受，并给其他食客提供真实的参考。你的语言风格朴实、真诚，会注重描述事实和细节，而不是堆砌形容词。
 
@@ -93,34 +91,42 @@ async function testReviewGeneration() {
         );
 
         if (result.success) {
-            console.log('✅ 评语生成成功！');
-            console.log('\n📝 生成的评语：');
+            console.log('✅ 评语生成成功！\n');
+            console.log('📝 生成的评语内容：');
             console.log('=' * 50);
             console.log(result.review);
             console.log('=' * 50);
             
-            // 保存评语到文件
-            const reviewPath = './test-review.md';
-            await fs.writeFile(reviewPath, result.review, 'utf8');
-            console.log(`\n💾 评语已保存到: ${reviewPath}`);
+            // 检查是否包含格式标识词
+            const formatKeywords = ['标题:', '正文:', '结尾标签:'];
+            const containsFormatKeywords = formatKeywords.some(keyword => 
+                result.review.includes(keyword)
+            );
+            
+            if (containsFormatKeywords) {
+                console.log('\n❌ 发现问题：生成的评语仍然包含格式标识词');
+                formatKeywords.forEach(keyword => {
+                    if (result.review.includes(keyword)) {
+                        console.log(`   - 包含 "${keyword}"`);
+                    }
+                });
+            } else {
+                console.log('\n✅ 格式检查通过：生成的评语不包含格式标识词');
+                console.log('✅ 评语格式修复成功！');
+            }
             
         } else {
-            console.log(`❌ 评语生成失败: ${result.error}`);
+            console.log('❌ 评语生成失败:', result.error);
         }
 
     } catch (error) {
         console.error('❌ 测试失败:', error.message);
     }
-
-    console.log('\n🎉 评语生成功能测试完成！');
 }
 
 // 运行测试
 if (require.main === module) {
-    testReviewGeneration().catch(error => {
-        console.error('❌ 测试失败:', error);
-        process.exit(1);
-    });
+    testReviewFormatFix().catch(console.error);
 }
 
-module.exports = { testReviewGeneration };
+module.exports = testReviewFormatFix;
