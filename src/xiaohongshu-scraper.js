@@ -746,6 +746,8 @@ class XiaohongshuScraper {
                 console.log('🍪 尝试使用已保存的Cookie登录...');
                 const cookieLoaded = await this.loadCookies();
                 if (cookieLoaded) {
+                    console.log('✅ Cookie已加载到浏览器，正在验证...');
+                    
                     // 访问小红书首页验证登录状态
                     await this.page.goto('https://www.xiaohongshu.com/explore', { 
                         waitUntil: 'domcontentloaded',
@@ -753,20 +755,18 @@ class XiaohongshuScraper {
                     });
                     await this.page.waitForTimeout(3000);
                     
-                    // 如果正在等待登录完成，跳过登录状态检查，避免登录框闪烁
-                    if (this._isWaitingForLogin) {
-                        console.log('⏳ 正在等待登录完成，跳过登录状态检查...');
-                        return true;
-                    }
+                    // ⚡ 关键修复：使用页面检测而不是Cookie文件评分
+                    // 直接检查页面状态，判断Cookie是否有效
+                    console.log('🔍 检查页面登录状态...');
+                    const isLoggedIn = await this.checkLoginStatusOnPage(this.page);
                     
-                    const loginStatus = await this.getUnifiedLoginStatus();
-            const isLoggedIn = loginStatus.isLoggedIn;
                     if (isLoggedIn) {
                         console.log('✅ 使用Cookie登录成功，无需重新登录！');
-                        // 强制返回true，绕过所有验证
-            return true;
+                        this.log('✅ 使用已保存的登录信息成功登录', 'success');
+                        return true;
                     } else {
-                        console.log('⚠️ Cookie已失效，需要重新登录');
+                        console.log('⚠️ Cookie已失效或无效，需要重新登录');
+                        this.log('⚠️ 登录信息已失效，需要重新登录', 'warning');
                     }
                 }
             }
@@ -1380,14 +1380,23 @@ class XiaohongshuScraper {
             
             console.log(`📊 过滤后有效Cookie: ${validCookies.length} 个`);
             
+            // 统一使用对象格式保存（包含元数据）
+            const cookieData = {
+                cookies: validCookies,
+                timestamp: new Date().toISOString(),
+                domain: 'xiaohongshu.com'
+            };
+            
             // 保存Cookie到文件
-            await fs.writeJson(this.loginConfig.cookieFile, validCookies, { spaces: 2 });
+            await fs.writeJson(this.loginConfig.cookieFile, cookieData, { spaces: 2 });
             console.log('✅ Cookie已保存到:', this.loginConfig.cookieFile);
+            console.log(`💾 保存了 ${validCookies.length} 个Cookie (对象格式)`);
             
             // 验证保存是否成功
             if (await fs.pathExists(this.loginConfig.cookieFile)) {
-                const savedCookies = await fs.readJson(this.loginConfig.cookieFile);
-                console.log(`✅ 验证保存成功: ${savedCookies.length} 个Cookie`);
+                const savedData = await fs.readJson(this.loginConfig.cookieFile);
+                const savedCookies = savedData.cookies || savedData;
+                console.log(`✅ 验证保存成功: ${Array.isArray(savedCookies) ? savedCookies.length : '格式错误'} 个Cookie`);
             } else {
                 console.log('❌ Cookie文件保存失败');
             }
@@ -1414,7 +1423,20 @@ class XiaohongshuScraper {
                 return false;
             }
             
-            const cookies = await fs.readJson(this.loginConfig.cookieFile);
+            const cookieData = await fs.readJson(this.loginConfig.cookieFile);
+            
+            // 兼容两种格式：数组格式和对象格式
+            let cookies;
+            if (Array.isArray(cookieData)) {
+                // 旧格式：直接是数组
+                cookies = cookieData;
+            } else if (cookieData.cookies && Array.isArray(cookieData.cookies)) {
+                // 新格式：对象包含cookies数组
+                cookies = cookieData.cookies;
+            } else {
+                console.log('⚠️ Cookie文件格式不正确，需要重新登录');
+                return false;
+            }
             
             // 检查Cookie是否为空或无效
             if (!cookies || cookies.length === 0) {
@@ -1428,8 +1450,7 @@ class XiaohongshuScraper {
                 if (cookie.expires && cookie.expires < now / 1000) {
                     return false; // Cookie已过期
                 }
-                // 强制返回true，绕过所有验证
-            return true;
+                return true;
             });
             
             if (validCookies.length === 0) {
@@ -1437,13 +1458,14 @@ class XiaohongshuScraper {
                 return false;
             }
             
+            console.log(`🍪 尝试加载 ${validCookies.length} 个有效Cookie...`);
             await this.page.context().addCookies(validCookies);
-            console.log(`🍪 已加载 ${validCookies.length} 个有效Cookie`);
-            // 强制返回true，绕过所有验证
+            console.log(`✅ 已成功加载 ${validCookies.length} 个Cookie`);
             return true;
             
         } catch (error) {
             console.error('❌ 加载Cookie失败:', error.message);
+            console.error('错误详情:', error);
             return false;
         }
     }
