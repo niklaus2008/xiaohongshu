@@ -1451,6 +1451,27 @@ npm run start:web
 
 ## 🔧 最新修复 (2024-12-19)
 
+### Git 历史记录清理 - dist-electron 大文件移除
+
+**问题描述**：GitHub 推送失败，提示 `dist-electron` 目录中包含超过 100MB 的文件，超过了 GitHub 的文件大小限制。
+
+**解决方案**：
+1. **更新 .gitignore**：在 `.gitignore` 文件中添加 `dist-electron/` 和 `dist/` 目录，防止未来再次提交构建输出文件
+2. **清理 Git 历史**：使用 `git filter-branch` 从所有提交历史中完全移除 `dist-electron` 目录
+3. **清理引用和垃圾回收**：清理 filter-branch 创建的备份引用，执行垃圾回收以减小仓库大小
+
+**技术实现**：
+- 使用 `git filter-branch --index-filter` 从所有分支和标签中移除 `dist-electron` 目录
+- 清理 `.git/refs/original/` 备份引用
+- 执行 `git gc --prune=now --aggressive` 进行垃圾回收
+
+**注意事项**：
+- ⚠️ **需要强制推送**：由于重写了 Git 历史，需要使用 `git push --force` 推送到远程仓库
+- ⚠️ **团队协作**：如果其他人也在使用这个仓库，需要通知他们重新克隆仓库或执行 `git pull --rebase`
+- ✅ **未来保护**：`.gitignore` 已更新，构建输出文件不会再被提交
+
+## 🔧 最新修复 (2024-12-19)
+
 ### 评语生成格式优化
 
 **问题描述**：用户反馈生成的评语包含"标题:"、"正文:"、"结尾标签:"等格式标识词，希望直接输出纯净的评语内容。
