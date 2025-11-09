@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小红书餐馆图片下载工具 - 选项</title>
+    <link rel="stylesheet" href="options.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>
+                <i class="icon-settings"></i>
+                高级设置
+            </h1>
+            <p class="subtitle">配置AI服务、下载选项等高级功能</p>
+        </header>
+
+        <!-- AI服务配置 -->
+        <section class="section">
+            <h2>
+                <i class="icon-ai"></i>
+                AI服务配置
+            </h2>
+            <div class="form-group">
+                <label for="aiEnabled">启用AI分析</label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="aiEnabled">
+                    <span>启用AI智能分析功能</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label for="aiApiKey">API密钥</label>
+                <input type="password" id="aiApiKey" class="form-control" placeholder="请输入AI服务API密钥">
+                <small class="form-text">用于调用AI服务进行图片分析</small>
+            </div>
+            <div class="form-group">
+                <label for="aiApiUrl">API地址</label>
+                <input type="text" id="aiApiUrl" class="form-control" placeholder="https://open.bigmodel.cn/api/paas/v4/chat/completions" value="https://open.bigmodel.cn/api/paas/v4/chat/completions">
+                <small class="form-text">AI服务的API地址</small>
+            </div>
+            <div class="form-group">
+                <label for="aiModel">模型名称</label>
+                <input type="text" id="aiModel" class="form-control" placeholder="glm-4-flash" value="glm-4-flash">
+                <small class="form-text">使用的AI模型名称</small>
+            </div>
+        </section>
+
+        <!-- 下载选项 -->
+        <section class="section">
+            <h2>
+                <i class="icon-download"></i>
+                下载选项
+            </h2>
+            <div class="form-group">
+                <label for="defaultDownloadPath">默认下载路径</label>
+                <input type="text" id="defaultDownloadPath" class="form-control" placeholder="downloads" value="downloads">
+                <small class="form-text">图片保存的默认路径（相对于Chrome下载目录）</small>
+            </div>
+            <div class="form-group">
+                <label for="downloadDelay">下载延迟（毫秒）</label>
+                <input type="number" id="downloadDelay" class="form-control" min="0" max="10000" value="1000">
+                <small class="form-text">每次下载之间的延迟时间，避免请求过快</small>
+            </div>
+        </section>
+
+        <!-- 图片处理选项 -->
+        <section class="section">
+            <h2>
+                <i class="icon-image"></i>
+                图片处理选项
+            </h2>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="autoRemoveWatermark" checked>
+                    <span>自动去除水印</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="autoProcessImage" checked>
+                    <span>自动处理图片（裁剪、优化）</span>
+                </label>
+            </div>
+        </section>
+
+        <!-- 其他选项 -->
+        <section class="section">
+            <h2>
+                <i class="icon-other"></i>
+                其他选项
+            </h2>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="showNotifications">
+                    <span>显示下载通知</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="autoOpenFolder">
+                    <span>下载完成后自动打开文件夹</span>
+                </label>
+            </div>
+        </section>
+
+        <!-- 数据管理 -->
+        <section class="section">
+            <h2>
+                <i class="icon-data"></i>
+                数据管理
+            </h2>
+            <div class="button-group">
+                <button class="btn btn-primary" id="saveOptionsBtn">
+                    <i class="icon-save"></i>
+                    保存设置
+                </button>
+                <button class="btn btn-secondary" id="resetOptionsBtn">
+                    <i class="icon-reset"></i>
+                    重置为默认值
+                </button>
+                <button class="btn btn-secondary" id="exportDataBtn">
+                    <i class="icon-export"></i>
+                    导出数据
+                </button>
+                <button class="btn btn-secondary" id="importDataBtn">
+                    <i class="icon-import"></i>
+                    导入数据
+                </button>
+                <button class="btn btn-danger" id="clearDataBtn">
+                    <i class="icon-clear"></i>
+                    清除所有数据
+                </button>
+            </div>
+        </section>
+
+        <!-- 关于 -->
+        <section class="section">
+            <h2>
+                <i class="icon-info"></i>
+                关于
+            </h2>
+            <div class="about-content">
+                <p><strong>版本:</strong> 1.0.0</p>
+                <p><strong>描述:</strong> 批量下载小红书餐馆相关图片，支持智能水印去除和AI分析</p>
+                <p><strong>作者:</strong> AI Assistant</p>
+                <p><strong>许可证:</strong> MIT</p>
+            </div>
+        </section>
+    </div>
+
+    <script src="options.js"></script>
+</body>
+</html>
+

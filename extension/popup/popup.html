@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小红书餐馆图片下载工具</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header class="header">
+            <h1>
+                <i class="icon-download"></i>
+                小红书餐馆图片下载工具
+            </h1>
+            <p class="subtitle">批量下载餐馆相关图片，支持智能水印去除</p>
+        </header>
+
+        <!-- 登录状态板块 -->
+        <section class="section login-section">
+            <h2>
+                <i class="icon-user"></i>
+                登录状态
+            </h2>
+            <div id="loginStatus" class="status-checking">
+                <div class="spinner"></div>
+                <p>正在检查登录状态...</p>
+            </div>
+            <div class="button-group">
+                <button class="btn btn-primary" id="loginBtn" style="display: none;">
+                    <i class="icon-sign-in"></i>
+                    登录小红书
+                </button>
+                <button class="btn btn-secondary" id="checkLoginBtn" style="display: none;">
+                    <i class="icon-sync"></i>
+                    重新检查登录状态
+                </button>
+            </div>
+        </section>
+
+        <!-- 配置设置板块 -->
+        <section class="section config-section">
+            <h2>
+                <i class="icon-cog"></i>
+                配置设置
+            </h2>
+            <div class="form-group">
+                <label for="maxImages">每个餐馆下载的图片数</label>
+                <input type="number" id="maxImages" class="form-control" min="1" max="100" value="6">
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="removeWatermark" checked>
+                    <span>智能去除水印</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="enableProcessing" checked>
+                    <span>启用图片后处理</span>
+                </label>
+            </div>
+        </section>
+
+        <!-- 餐馆配置板块 -->
+        <section class="section restaurant-section">
+            <div class="section-header">
+                <h2>
+                    <i class="icon-list"></i>
+                    餐馆配置
+                </h2>
+                <div class="button-group-inline">
+                    <button class="btn btn-primary btn-sm" id="startDownloadBtn" disabled>
+                        <i class="icon-play"></i>
+                        开始下载
+                    </button>
+                    <button class="btn btn-secondary btn-sm" id="addRestaurantBtn">
+                        <i class="icon-plus"></i>
+                        添加
+                    </button>
+                    <button class="btn btn-secondary btn-sm" id="importBtn">
+                        <i class="icon-upload"></i>
+                        导入
+                    </button>
+                </div>
+            </div>
+            <div id="restaurantList" class="restaurant-list">
+                <p class="empty-message">暂无餐馆配置，请添加或导入</p>
+            </div>
+        </section>
+
+        <!-- 下载进度板块 -->
+        <section class="section progress-section" id="progressSection" style="display: none;">
+            <h2>
+                <i class="icon-progress"></i>
+                下载进度
+            </h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                </div>
+                <div class="progress-text" id="progressText">0%</div>
+            </div>
+            <div id="currentTask" class="current-task"></div>
+            <div id="progressDetails" class="progress-details"></div>
+        </section>
+
+        <!-- 日志显示板块 -->
+        <section class="section log-section" id="logSection" style="display: none;">
+            <div class="section-header">
+                <h2>
+                    <i class="icon-log"></i>
+                    日志
+                </h2>
+                <div class="log-controls">
+                    <select id="logLevel" class="form-control form-control-sm">
+                        <option value="all">全部</option>
+                        <option value="info">信息</option>
+                        <option value="success">成功</option>
+                        <option value="warning">警告</option>
+                        <option value="error">错误</option>
+                    </select>
+                    <button class="btn btn-secondary btn-sm" id="clearLogBtn">
+                        <i class="icon-clear"></i>
+                        清空
+                    </button>
+                </div>
+            </div>
+            <div id="logContainer" class="log-container"></div>
+        </section>
+
+        <!-- 配置管理板块 -->
+        <section class="section config-management-section">
+            <h2>
+                <i class="icon-settings"></i>
+                配置管理
+            </h2>
+            <div class="button-group">
+                <button class="btn btn-secondary" id="saveConfigBtn">
+                    <i class="icon-save"></i>
+                    保存配置
+                </button>
+                <button class="btn btn-secondary" id="loadConfigBtn">
+                    <i class="icon-load"></i>
+                    加载配置
+                </button>
+                <button class="btn btn-secondary" id="openOptionsBtn">
+                    <i class="icon-options"></i>
+                    高级设置
+                </button>
+            </div>
+        </section>
+    </div>
+
+    <!-- 添加餐馆对话框 -->
+    <div id="addRestaurantModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>添加餐馆</h3>
+                <button class="modal-close" id="closeModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="restaurantName">餐馆名称 *</label>
+                    <input type="text" id="restaurantName" class="form-control" placeholder="请输入餐馆名称" required>
+                </div>
+                <div class="form-group">
+                    <label for="restaurantLocation">地点（可选）</label>
+                    <input type="text" id="restaurantLocation" class="form-control" placeholder="请输入地点信息">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelAddBtn">取消</button>
+                <button class="btn btn-primary" id="confirmAddBtn">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
+
