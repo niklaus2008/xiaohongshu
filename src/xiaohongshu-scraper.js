@@ -1308,41 +1308,24 @@ class XiaohongshuScraper {
             console.log('⏳ 正在等待登录完成，请扫码或输入验证码...');
             
             while (elapsedTime < maxWaitTime) {
-                // 如果正在等待登录完成，完全停止检查，避免登录框闪烁
-                if (this._isWaitingForLogin) {
-                    console.log('⏳ 正在等待登录完成，完全停止检查...');
-                    // 等待更长时间，减少检查频率
-                    await this.page.waitForTimeout(10000); // 改为10秒检查一次
-                    elapsedTime += 10000;
-                    continue;
-                }
+                // 使用简化的登录检测（不依赖Cookie文件）
+                // 直接检查页面状态，判断是否已登录
+                const isLoggedIn = await this.checkLoginStatusOnPage(this.page);
                 
-                // 检查是否登录成功
-                const loginStatus = await this.getUnifiedLoginStatus();
-            const isLoggedIn = loginStatus.isLoggedIn;
                 if (isLoggedIn) {
-                    console.log('🎉 检测到登录成功！');
-                    // 强制返回true，绕过所有验证
-            return true;
-                }
-                
-                // 检查页面是否跳转或关闭了登录弹窗
-                const currentUrl = this.page.url();
-                if (!currentUrl.includes('login') && !currentUrl.includes('signin')) {
-                    // 页面已跳转，可能登录成功
-                    console.log('🔄 检测到页面跳转，重新检查登录状态...');
-                    // 如果正在等待登录完成，跳过登录状态检查，避免登录框闪烁
-                    if (this._isWaitingForLogin) {
-                        console.log('⏳ 正在等待登录完成，跳过登录状态检查...');
-                        return true;
+                    console.log('🎉 检测到登录成功！正在保存Cookie...');
+                    this.log('✅ 登录成功！正在保存登录状态...', 'success');
+                    
+                    // 保存Cookie
+                    try {
+                        await this.saveCookies();
+                        console.log('💾 Cookie已保存');
+                        this.log('💾 登录信息已保存，下次可自动登录', 'success');
+                    } catch (error) {
+                        console.log('⚠️ 保存Cookie失败，但不影响本次下载:', error.message);
                     }
                     
-                    const isLoggedInAfterRedirect = await this.checkLoginStatus();
-                    if (isLoggedInAfterRedirect) {
-                        console.log('🎉 页面跳转后检测到登录成功！');
-                        // 强制返回true，绕过所有验证
-            return true;
-                    }
+                    return true;
                 }
                 
                 // 等待一段时间后再次检查
@@ -2990,6 +2973,7 @@ class XiaohongshuScraper {
         // 检查是否已有登录窗口打开
         if (this.isLoginWindowOpen) {
             console.log('⚠️ 登录窗口已打开，请勿重复请求');
+            this.log('⚠️ 登录窗口已打开，请勿重复请求', 'warning');
             return { success: false, error: '登录窗口已打开，请勿重复请求' };
         }
         
@@ -2998,6 +2982,7 @@ class XiaohongshuScraper {
         
         try {
             console.log('🌐 正在连接到用户浏览器...');
+            this.log('🌐 正在准备登录窗口...', 'info');
             
             // 标记登录窗口已打开
             this.isLoginWindowOpen = true;
@@ -3005,6 +2990,7 @@ class XiaohongshuScraper {
             // 确保浏览器实例已初始化
             if (!this.browser) {
                 console.log('🔧 浏览器未初始化，正在初始化...');
+                this.log('🔧 初始化浏览器...', 'info');
                 await this.initBrowser();
             }
             userBrowser = this.browser;
@@ -3013,6 +2999,7 @@ class XiaohongshuScraper {
             // 创建新的页面用于登录
             loginPage = await userBrowser.newPage();
             console.log('🆕 已创建新的登录窗口');
+            this.log('🆕 已打开登录窗口', 'success');
             
             // 确保页面可见
             await loginPage.bringToFront();
@@ -3020,37 +3007,64 @@ class XiaohongshuScraper {
             
             // 打开小红书登录页面
             console.log('🌐 正在打开小红书登录页面...');
+            this.log('📱 请在Chromium浏览器中扫码登录...', 'info');
             await loginPage.goto('https://www.xiaohongshu.com/login', {
                 waitUntil: 'domcontentloaded',
                 timeout: 30000
             });
             console.log('✅ 登录页面已打开，请扫码登录');
-            console.log('⏰ 您有30秒时间完成登录...');
+            this.log('⏰ 等待您完成扫码登录（最多等待5分钟）...', 'info');
+            console.log('⏰ 您有充足时间完成登录，程序会自动检测...');
             
-            // 给用户30秒反应时间
-            await loginPage.waitForTimeout(30000);
+            // 增加初始等待时间到60秒，给用户更多时间
+            console.log('⏰ 初始等待60秒，请扫码...');
+            await loginPage.waitForTimeout(60000);
             
             // 检查登录状态
             const isLoggedIn = await this.checkLoginStatusOnPage(loginPage);
             if (isLoggedIn) {
                 console.log('✅ 检测到登录成功！正在获取Cookie...');
+                this.log('✅ 登录成功！正在保存登录状态...', 'success');
                 
                 // 获取Cookie
                 const cookies = await loginPage.context().cookies();
-                console.log('🍪 已获取Cookie，正在保存...');
+                console.log(`🍪 已获取 ${cookies.length} 个Cookie，正在保存...`);
+                this.log(`🍪 正在保存登录信息...`, 'info');
                 
                 // 保存Cookie到文件
                 await this.saveCookiesFromArray(cookies);
-                console.log('💾 Cookie已保存');
+                console.log('💾 Cookie已保存到文件');
+                this.log('💾 登录信息已保存，下次可自动登录', 'success');
+                
+                // 关键：将Cookie同步到主页面的上下文
+                console.log('🔄 正在同步Cookie到主页面...');
+                this.log('🔄 正在应用登录状态...', 'info');
+                await this.page.context().addCookies(cookies);
+                console.log('✅ Cookie已同步到主页面');
+                this.log('✅ 登录状态已应用', 'success');
+                
+                // 刷新主页面以应用Cookie
+                console.log('🔄 刷新主页面以应用登录状态...');
+                try {
+                    await this.page.goto('https://www.xiaohongshu.com/explore', { 
+                        waitUntil: 'domcontentloaded',
+                        timeout: 30000 
+                    });
+                    console.log('✅ 主页面已刷新');
+                } catch (error) {
+                    console.log('⚠️ 主页面刷新失败，但不影响继续:', error.message);
+                }
                 
                 // 关闭登录窗口
                 await loginPage.close();
                 this.isLoginWindowOpen = false; // 重置登录窗口状态
                 console.log('🔒 登录窗口已关闭');
+                this.log('🎉 登录完成！即将开始下载任务...', 'success');
                 
-                return { success: true, message: '登录成功，Cookie已更新' };
+                return { success: true, message: '登录成功，Cookie已更新并同步' };
             } else {
-                console.log('⏰ 30秒内未检测到登录，继续等待...');
+                console.log('⏰ 60秒内未检测到登录，继续等待...');
+                this.log('⏰ 还没检测到登录，请继续扫码...', 'info');
                 
                 // 继续等待用户手动登录
                 let attempts = 0;
@@ -3063,37 +3077,104 @@ class XiaohongshuScraper {
                     
                     console.log(`🔍 检查登录状态... (${attempts}/${maxAttempts})`);
                     
-                    // 如果正在等待登录完成，跳过登录状态检查，避免登录框闪烁
-                    if (this._isWaitingForLogin) {
-                        console.log('⏳ 正在等待登录完成，跳过登录状态检查...');
-                        // 继续等待，不要返回
-                        continue;
+                    // 每15秒提示一次
+                    if (attempts % 3 === 0) {
+                        this.log(`⏰ 等待登录中... (已等待${attempts * 5 + 60}秒)`, 'info');
                     }
                     
                     const isLoggedIn = await this.checkLoginStatusOnPage(loginPage);
                     if (isLoggedIn) {
                         console.log('✅ 检测到登录成功！正在获取Cookie...');
+                        this.log('✅ 登录成功！正在保存登录状态...', 'success');
                         
                         // 获取Cookie
                         const cookies = await loginPage.context().cookies();
-                        console.log('🍪 已获取Cookie，正在保存...');
+                        console.log(`🍪 已获取 ${cookies.length} 个Cookie，正在保存...`);
+                        this.log('🍪 正在保存登录信息...', 'info');
                         
                         // 保存Cookie到文件
                         await this.saveCookiesFromArray(cookies);
-                        console.log('💾 Cookie已保存');
+                        console.log('💾 Cookie已保存到文件');
+                        this.log('💾 登录信息已保存', 'success');
+                        
+                        // ⚡关键修复：将Cookie同步到主页面的上下文
+                        console.log('🔄 正在同步Cookie到主页面...');
+                        this.log('🔄 正在应用登录状态...', 'info');
+                        try {
+                            await this.page.context().addCookies(cookies);
+                            console.log('✅ Cookie已同步到主页面');
+                            this.log('✅ 登录状态已应用', 'success');
+                            
+                            // 刷新主页面以应用Cookie
+                            console.log('🔄 刷新主页面...');
+                            await this.page.goto('https://www.xiaohongshu.com/explore', { 
+                                waitUntil: 'domcontentloaded',
+                                timeout: 30000 
+                            });
+                            console.log('✅ 主页面已刷新');
+                        } catch (error) {
+                            console.log('⚠️ Cookie同步失败，但不影响继续:', error.message);
+                        }
                         
                         // 关闭登录窗口
                         await loginPage.close();
                         this.isLoginWindowOpen = false; // 重置登录窗口状态
                         console.log('🔒 登录窗口已关闭');
+                        this.log('🎉 登录完成！即将开始下载任务...', 'success');
                         
-                        return { success: true, message: '登录成功，Cookie已更新' };
+                        return { success: true, message: '登录成功，Cookie已更新并同步' };
                     }
                     
                     console.log('⏳ 等待登录中...');
                 }
                 
-                console.log('⏰ 等待登录超时');
+                // 超时前最后一次尝试：检查页面URL
+                console.log('⏰ 等待登录超时，进行最后一次检查...');
+                this.log('⏰ 登录超时，检查当前状态...', 'warning');
+                
+                const finalUrl = loginPage.url();
+                console.log(`🔍 最终页面URL: ${finalUrl}`);
+                
+                // 如果页面已经不在登录页，强制保存Cookie
+                if (!finalUrl.includes('/login') && !finalUrl.includes('/signin')) {
+                    console.log('✅ 页面已离开登录页，强制保存Cookie...');
+                    this.log('✅ 检测到页面已跳转，保存登录状态...', 'info');
+                    
+                    try {
+                        // 获取并保存Cookie
+                        const cookies = await loginPage.context().cookies();
+                        console.log(`🍪 强制获取 ${cookies.length} 个Cookie`);
+                        
+                        await this.saveCookiesFromArray(cookies);
+                        console.log('💾 Cookie已强制保存');
+                        this.log('💾 登录信息已保存', 'success');
+                        
+                        // 同步到主页面
+                        try {
+                            await this.page.context().addCookies(cookies);
+                            await this.page.goto('https://www.xiaohongshu.com/explore', { 
+                                waitUntil: 'domcontentloaded',
+                                timeout: 30000 
+                            });
+                            console.log('✅ Cookie已同步到主页面');
+                            this.log('✅ 登录状态已应用', 'success');
+                        } catch (error) {
+                            console.log('⚠️ Cookie同步失败:', error.message);
+                        }
+                        
+                        await loginPage.close();
+                        this.isLoginWindowOpen = false;
+                        console.log('🎉 登录已完成（超时强制保存）');
+                        this.log('🎉 登录完成！即将开始下载任务...', 'success');
+                        
+                        return { success: true, message: '登录成功（超时强制保存）' };
+                    } catch (error) {
+                        console.error('❌ 强制保存Cookie失败:', error.message);
+                    }
+                }
+                
+                console.log('⏰ 登录确实超时，无法获取登录状态');
+                this.log('❌ 登录超时，请重试', 'error');
                 this.isLoginWindowOpen = false; // 重置登录窗口状态
                 return { success: false, error: '登录超时' };
             }
@@ -3130,39 +3211,58 @@ class XiaohongshuScraper {
      */
     async checkLoginStatusOnPage(page) {
         try {
-            return await page.evaluate(() => {
+            // 首先检查URL是否已经离开登录页面
+            const currentUrl = page.url();
+            console.log(`🔍 检查页面URL: ${currentUrl}`);
+            
+            // 如果已经离开登录页面，说明登录成功
+            if (!currentUrl.includes('/login') && !currentUrl.includes('/signin')) {
+                console.log('✅ 页面已离开登录页，判定为登录成功');
+                return true;
+            }
+            
+            // 如果还在登录页，检查页面元素
+            const loginStatus = await page.evaluate(() => {
                 // 检查页面内容
                 const bodyText = document.body ? document.body.innerText : '';
+                const currentUrl = window.location.href;
                 
                 // 检查是否存在明确的登录提示
                 const hasLoginPrompt = bodyText.includes('登录后查看') || 
                                      bodyText.includes('扫码登录') ||
                                      bodyText.includes('手机号登录') ||
                                      bodyText.includes('请登录') ||
-                                     bodyText.includes('登录查看');
+                                     bodyText.includes('登录查看') ||
+                                     bodyText.includes('二维码登录');
                 
-                // 如果页面显示登录提示，直接返回未登录
-                if (hasLoginPrompt) {
-                    return false;
-                }
-                
-                // 检查是否存在用户相关元素
+                // 检查是否存在用户相关元素（说明已登录）
                 const userElements = document.querySelectorAll('.user-info, .user-avatar, .profile, [data-testid*="user"], .user-name, .user-menu');
                 const hasUserElements = userElements.length > 0;
                 
-                // 检查是否存在登录相关元素
-                const loginElements = document.querySelectorAll('.login-btn, .login-button, [data-testid*="login"]');
-                const hasLoginElements = loginElements.length > 0;
+                // 检查页面顶部是否有"发现"、"发布"、"通知"、"我"等已登录才有的导航
+                const hasNavElements = bodyText.includes('发现') && 
+                                     bodyText.includes('发布') && 
+                                     (bodyText.includes('通知') || bodyText.includes('消息'));
                 
-                // 检查是否有真正的搜索结果（不是登录提示）
-                const hasRealContent = bodyText.length > 100 && 
-                                     !bodyText.includes('登录后查看') &&
-                                     !bodyText.includes('扫码登录') &&
-                                     !bodyText.includes('手机号登录');
-                
-                // 如果存在用户元素且不存在登录元素且有真正的内容，则认为已登录
-                return hasUserElements && !hasLoginElements && hasRealContent;
+                return {
+                    hasLoginPrompt: hasLoginPrompt,
+                    hasUserElements: hasUserElements,
+                    hasNavElements: hasNavElements,
+                    url: currentUrl
+                };
             });
+            
+            console.log('🔍 页面登录状态检查:', loginStatus);
+            
+            // 判断逻辑简化：
+            // 1. 如果没有登录提示 + 有用户元素，判定为已登录
+            // 2. 如果没有登录提示 + 有导航元素，判定为已登录
+            const isLoggedIn = !loginStatus.hasLoginPrompt && 
+                             (loginStatus.hasUserElements || loginStatus.hasNavElements);
+            
+            console.log(`🔍 登录状态判定: ${isLoggedIn ? '已登录' : '未登录'}`);
+            return isLoggedIn;
+            
         } catch (error) {
             console.error('检查登录状态时出错:', error.message);
             return false;
