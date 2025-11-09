@@ -8,7 +8,8 @@
     "storage",
     "cookies",
     "tabs",
-    "activeTab"
+    "activeTab",
+    "notifications"
   ],
   "host_permissions": [
     "https://www.xiaohongshu.com/*",
@@ -34,7 +35,6 @@
     }
   ],
   "action": {
-    "default_popup": "popup/popup.html",
     "default_title": "小红书餐馆图片下载工具",
     "default_icon": {
       "16": "assets/icons/icon16.png",

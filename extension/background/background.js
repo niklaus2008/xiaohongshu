@@ -43,6 +43,70 @@ async function initAIService() {
 initAIService();
 
 /**
+ * 监听插件按钮点击事件 - 打开网页界面
+ */
+chrome.action.onClicked.addListener(async (tab) => {
+    try {
+        const webInterfaceUrl = 'http://localhost:3000';
+        
+        // 检查是否已经打开了该URL的标签页
+        // 注意：需要匹配完整的URL模式
+        const tabs = await chrome.tabs.query({ 
+            url: ['http://localhost:3000/*', 'http://127.0.0.1:3000/*']
+        });
+        
+        if (tabs.length > 0) {
+            // 如果已经打开，激活该标签页
+            await chrome.tabs.update(tabs[0].id, { active: true });
+            await chrome.windows.update(tabs[0].windowId, { focused: true });
+            console.log('✅ 已激活Web界面标签页');
+        } else {
+            // 如果没有打开，创建新标签页
+            const newTab = await chrome.tabs.create({ url: webInterfaceUrl });
+            console.log('✅ 已打开Web界面:', webInterfaceUrl);
+            
+            // 监听标签页加载状态，如果加载失败，提示用户
+            const checkTabStatus = (tabId, changeInfo) => {
+                if (tabId === newTab.id && changeInfo.status === 'complete') {
+                    chrome.tabs.onUpdated.removeListener(checkTabStatus);
+                    
+                    // 延迟检查，给页面一些时间加载
+                    setTimeout(async () => {
+                        try {
+                            const updatedTab = await chrome.tabs.get(tabId);
+                            // 如果URL变成错误页面，说明服务器未运行
+                            if (updatedTab.url && updatedTab.url.startsWith('chrome-error://')) {
+                                // 显示通知提示用户启动服务器
+                                chrome.notifications.create({
+                                    type: 'basic',
+                                    iconUrl: chrome.runtime.getURL('assets/icons/icon48.png'),
+                                    title: 'Web界面无法打开',
+                                    message: '请先运行 npm run start:web 启动Web界面服务器'
+                                });
+                            }
+                        } catch (error) {
+                            // 忽略错误（标签页可能已关闭）
+                            console.log('检查标签页状态时出错:', error);
+                        }
+                    }, 2000); // 等待2秒后检查
+                }
+            };
+            
+            chrome.tabs.onUpdated.addListener(checkTabStatus);
+        }
+    } catch (error) {
+        console.error('打开网页界面失败:', error);
+        // 显示错误通知
+        chrome.notifications.create({
+            type: 'basic',
+            iconUrl: chrome.runtime.getURL('assets/icons/icon48.png'),
+            title: '打开Web界面失败',
+            message: '请确保Web界面服务器已启动 (npm run start:web)'
+        });
+    }
+});
+
+/**
  * 监听来自popup和content script的消息
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
