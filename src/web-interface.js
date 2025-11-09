@@ -113,7 +113,11 @@ class WebInterface {
     constructor(options = {}) {
         this.port = options.port || 3000;
         this.host = options.host || 'localhost';
-        this.autoOpenBrowser = options.autoOpenBrowser !== undefined ? options.autoOpenBrowser : true;
+        // 支持环境变量控制是否自动打开浏览器（后台运行时设为false）
+        const envAutoOpen = process.env.AUTO_OPEN_BROWSER;
+        this.autoOpenBrowser = options.autoOpenBrowser !== undefined 
+            ? options.autoOpenBrowser 
+            : (envAutoOpen === 'false' ? false : true);
         this.app = express();
         this.server = http.createServer(this.app);
         this.io = socketIo(this.server, {
@@ -199,6 +203,7 @@ class WebInterface {
         this.app.post('/api/open-browser', this.handleOpenBrowser.bind(this));
         this.app.post('/api/login/check-cross-window', this.handleCheckCrossWindowLogin.bind(this));
         this.app.post('/api/ai/test', this.handleAiTest.bind(this));
+        this.app.post('/api/start-server', this.handleStartServer.bind(this));
         
         // 错误处理中间件
         this.app.use((err, req, res, next) => {
@@ -1392,6 +1397,30 @@ class WebInterface {
             console.error('❌ 关闭服务器失败:', error);
             this.logger.sendErrorLog('关闭服务器失败', error);
             process.exit(1);
+        }
+    }
+
+    /**
+     * 处理启动服务器请求
+     * 注意：如果服务器已经在运行，这个API无法被调用
+     * 这个方法主要用于通过其他方式（如独立启动脚本）启动服务器后，通知服务器已启动
+     * @param {Object} req 请求对象
+     * @param {Object} res 响应对象
+     */
+    async handleStartServer(req, res) {
+        try {
+            // 如果服务器已经在运行，直接返回成功
+            res.json({
+                success: true,
+                message: '服务器已在运行'
+            });
+        } catch (error) {
+            console.error('启动服务器失败:', error);
+            res.json({
+                success: false,
+                message: '启动服务器失败',
+                error: error.message
+            });
         }
     }
 

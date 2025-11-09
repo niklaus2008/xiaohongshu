@@ -14,7 +14,11 @@
   "host_permissions": [
     "https://www.xiaohongshu.com/*",
     "https://*.xiaohongshu.com/*",
-    "https://open.bigmodel.cn/*"
+    "https://open.bigmodel.cn/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*",
+    "http://localhost:3001/*",
+    "http://127.0.0.1:3001/*"
   ],
   "background": {
     "service_worker": "background/background.js"
@@ -59,9 +63,6 @@
         "https://*.xiaohongshu.com/*"
       ]
     }
-  ],
-  "importScripts": [
-    "lib/ai-service.js"
   ]
 }
 

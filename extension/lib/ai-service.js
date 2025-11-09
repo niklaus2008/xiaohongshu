@@ -313,6 +313,13 @@ ${analysisText}${specialtiesText}
     }
 }
 
+// 在 Service Worker 环境中，直接暴露到全局作用域
+// 这样 importScripts 加载后，AIService 类就可以在 background.js 中使用
+if (typeof self !== 'undefined') {
+    // Service Worker 环境
+    self.AIService = AIService;
+}
+
 // 如果在浏览器环境中，导出到全局
 if (typeof window !== 'undefined') {
     window.AIService = AIService;

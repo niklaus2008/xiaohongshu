@@ -42,6 +42,27 @@
                     sendResponse({ success: false, error: error.message });
                 });
                 return true;
+            } else if (message.action === 'copyToClipboard') {
+                // 复制文本到剪贴板
+                navigator.clipboard.writeText(message.text).then(() => {
+                    sendResponse({ success: true });
+                }).catch(error => {
+                    // 如果clipboard API失败，使用传统方法
+                    const textArea = document.createElement('textarea');
+                    textArea.value = message.text;
+                    textArea.style.position = 'fixed';
+                    textArea.style.left = '-999999px';
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    try {
+                        document.execCommand('copy');
+                        sendResponse({ success: true });
+                    } catch (err) {
+                        sendResponse({ success: false, error: err.message });
+                    }
+                    document.body.removeChild(textArea);
+                });
+                return true;
             }
         });
 

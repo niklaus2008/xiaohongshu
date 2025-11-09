@@ -6,9 +6,37 @@
  * @version 1.0.0
  */
 
-// 注意：Service Worker中通过importScripts加载AI服务
-// AIService类会在importScripts加载后可用
+// 在 Manifest V3 中，AI服务是可选的
+// 如果加载失败，插件仍然可以正常运行，只是AI功能不可用
 let aiServiceInstance = null;
+let AIService = null;
+
+// AI服务脚本加载（可选功能）
+// 注意：在 Manifest V3 的 Service Worker 中，importScripts 可能受到限制
+// 如果无法加载，插件仍然可以正常运行，只是AI功能不可用
+// 
+// 暂时注释掉 importScripts，避免加载错误导致插件无法启动
+// 如果需要AI功能，可以考虑将代码内联或使用其他加载方式
+/*
+try {
+    importScripts('lib/ai-service.js');
+    if (typeof self !== 'undefined' && typeof self.AIService !== 'undefined') {
+        AIService = self.AIService;
+        console.log('✅ AI服务脚本加载成功');
+    } else if (typeof AIService !== 'undefined') {
+        console.log('✅ AI服务脚本加载成功（全局作用域）');
+    } else {
+        console.warn('⚠️ AI服务脚本已加载，但 AIService 类未定义');
+        AIService = null;
+    }
+} catch (error) {
+    console.warn('⚠️ AI服务脚本加载失败，AI功能将不可用:', error.message || error.toString());
+    AIService = null;
+}
+*/
+// 暂时禁用AI服务加载，确保插件可以正常启动
+AIService = null;
+console.log('ℹ️ AI服务功能已禁用，插件基本功能正常可用');
 
 // 全局状态
 let downloadQueue = [];
@@ -24,14 +52,19 @@ let downloadStats = {
 // 初始化AI服务
 async function initAIService() {
     try {
+        // 如果 AIService 未加载，跳过初始化
+        if (!AIService || typeof AIService === 'undefined') {
+            console.log('AI服务未加载，跳过初始化');
+            return;
+        }
+        
         const aiConfig = await chrome.storage.sync.get(['aiConfig']);
         if (aiConfig.aiConfig && aiConfig.aiConfig.enabled && aiConfig.aiConfig.apiKey) {
-            // 使用全局AIService类（通过importScripts加载）
-            if (typeof AIService !== 'undefined') {
+            try {
                 aiServiceInstance = new AIService(aiConfig.aiConfig);
-                console.log('AI服务已初始化');
-            } else {
-                console.warn('AIService类未加载，请检查importScripts配置');
+                console.log('✅ AI服务已初始化');
+            } catch (error) {
+                console.error('创建AI服务实例失败:', error);
             }
         }
     } catch (error) {
@@ -39,60 +72,146 @@ async function initAIService() {
     }
 }
 
+// Service Worker 启动日志
+console.log('🚀 Background Service Worker 已启动');
+console.log('📍 当前时间:', new Date().toLocaleString());
+
 // 初始化
-initAIService();
+initAIService().then(() => {
+    console.log('✅ 初始化完成');
+}).catch(error => {
+    console.error('❌ 初始化失败:', error);
+});
 
 /**
- * 监听插件按钮点击事件 - 打开网页界面
+ * 检查服务器是否运行
+ */
+async function checkServerRunning() {
+    try {
+        // 使用 AbortController 实现超时（兼容性更好）
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        
+        const response = await fetch('http://localhost:3000/api/status', {
+            method: 'GET',
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        return response.ok;
+    } catch (error) {
+        // 超时或其他错误都返回 false
+        return false;
+    }
+}
+
+/**
+ * 启动后台服务器
+ * 由于Chrome Extension无法直接执行系统命令，这里通过调用启动脚本实现
+ */
+async function startServer() {
+    try {
+        // 尝试通过执行启动脚本来启动服务器
+        // 注意：Chrome Extension无法直接执行系统命令，所以这里显示提示
+        console.log('服务器未运行，需要启动服务器...');
+        
+        // 显示通知提示用户启动服务器
+        chrome.notifications.create({
+            type: 'basic',
+            iconUrl: chrome.runtime.getURL('assets/icons/icon48.png'),
+            title: '需要启动服务器',
+            message: '请在终端运行: npm run start:web:background',
+            buttons: [
+                { title: '复制命令' }
+            ]
+        }, (notificationId) => {
+            if (chrome.runtime.lastError) {
+                console.error('创建通知失败:', chrome.runtime.lastError);
+                return;
+            }
+            
+            // 监听通知按钮点击（只设置一次）
+            if (notificationId && chrome.notifications.onButtonClicked) {
+                const listener = (clickedNotificationId, buttonIndex) => {
+                    if (clickedNotificationId === notificationId && buttonIndex === 0) {
+                        // 复制命令到剪贴板
+                        // 注意：Chrome Extension无法直接访问剪贴板，需要通过content script
+                        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                            if (tabs && tabs[0]) {
+                                chrome.tabs.sendMessage(tabs[0].id, {
+                                    action: 'copyToClipboard',
+                                    text: 'npm run start:web:background'
+                                }).catch(() => {
+                                    // 如果发送消息失败，忽略错误
+                                    console.log('无法发送消息到content script');
+                                });
+                            }
+                        });
+                        // 移除监听器，避免重复处理
+                        chrome.notifications.onButtonClicked.removeListener(listener);
+                    }
+                };
+                chrome.notifications.onButtonClicked.addListener(listener);
+            }
+        });
+        
+        return false;
+    } catch (error) {
+        console.error('启动服务器失败:', error);
+        return false;
+    }
+}
+
+/**
+ * 监听插件按钮点击事件 - 检查并启动服务器，然后打开网页界面
  */
 chrome.action.onClicked.addListener(async (tab) => {
+    console.log('🖱️ 插件图标被点击');
+    console.log('📋 当前标签页:', tab);
+    
     try {
         const webInterfaceUrl = 'http://localhost:3000';
         
+        console.log('🔍 检查服务器是否运行...');
+        // 首先检查服务器是否运行
+        const isRunning = await checkServerRunning();
+        console.log('✅ 服务器运行状态:', isRunning);
+        
+        if (!isRunning) {
+            // 服务器未运行，直接提示用户并打开页面
+            console.log('⚠️ 服务器未运行，显示提示');
+            
+            // 显示通知提示用户启动服务器
+            chrome.notifications.create({
+                type: 'basic',
+                iconUrl: chrome.runtime.getURL('assets/icons/icon48.png'),
+                title: '需要启动服务器',
+                message: '请在终端运行: npm run start:web:background',
+                priority: 2
+            });
+            
+            // 仍然尝试打开页面（让浏览器显示错误页面）
+            console.log('📄 尝试打开页面（服务器未运行）');
+        }
+        
         // 检查是否已经打开了该URL的标签页
-        // 注意：需要匹配完整的URL模式
+        console.log('🔍 查找已打开的标签页...');
         const tabs = await chrome.tabs.query({ 
             url: ['http://localhost:3000/*', 'http://127.0.0.1:3000/*']
         });
+        console.log('📋 找到的标签页数量:', tabs.length);
         
         if (tabs.length > 0) {
             // 如果已经打开，激活该标签页
+            console.log('✅ 激活已存在的标签页:', tabs[0].id);
             await chrome.tabs.update(tabs[0].id, { active: true });
             await chrome.windows.update(tabs[0].windowId, { focused: true });
             console.log('✅ 已激活Web界面标签页');
         } else {
             // 如果没有打开，创建新标签页
+            console.log('📄 创建新标签页...');
             const newTab = await chrome.tabs.create({ url: webInterfaceUrl });
-            console.log('✅ 已打开Web界面:', webInterfaceUrl);
-            
-            // 监听标签页加载状态，如果加载失败，提示用户
-            const checkTabStatus = (tabId, changeInfo) => {
-                if (tabId === newTab.id && changeInfo.status === 'complete') {
-                    chrome.tabs.onUpdated.removeListener(checkTabStatus);
-                    
-                    // 延迟检查，给页面一些时间加载
-                    setTimeout(async () => {
-                        try {
-                            const updatedTab = await chrome.tabs.get(tabId);
-                            // 如果URL变成错误页面，说明服务器未运行
-                            if (updatedTab.url && updatedTab.url.startsWith('chrome-error://')) {
-                                // 显示通知提示用户启动服务器
-                                chrome.notifications.create({
-                                    type: 'basic',
-                                    iconUrl: chrome.runtime.getURL('assets/icons/icon48.png'),
-                                    title: 'Web界面无法打开',
-                                    message: '请先运行 npm run start:web 启动Web界面服务器'
-                                });
-                            }
-                        } catch (error) {
-                            // 忽略错误（标签页可能已关闭）
-                            console.log('检查标签页状态时出错:', error);
-                        }
-                    }, 2000); // 等待2秒后检查
-                }
-            };
-            
-            chrome.tabs.onUpdated.addListener(checkTabStatus);
+            console.log('✅ 已打开Web界面:', webInterfaceUrl, '标签页ID:', newTab.id);
         }
     } catch (error) {
         console.error('打开网页界面失败:', error);
@@ -101,7 +220,7 @@ chrome.action.onClicked.addListener(async (tab) => {
             type: 'basic',
             iconUrl: chrome.runtime.getURL('assets/icons/icon48.png'),
             title: '打开Web界面失败',
-            message: '请确保Web界面服务器已启动 (npm run start:web)'
+            message: '请确保Web界面服务器已启动 (npm run start:web:background)'
         });
     }
 });

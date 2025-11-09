@@ -25,6 +25,10 @@ config.json
 
 # 日志文件
 *.log
+logs/web-server.log
+
+# 后台服务PID文件
+.web-server.pid
 
 # 临时文件
 .tmp/

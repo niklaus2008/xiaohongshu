@@ -612,11 +612,29 @@ cp config.template.json config.json
 
 ### 3. 启动Web界面（推荐）
 
+**方式一：通过前端页面启动（最简单）**
+1. 首先启动启动器服务（只需运行一次）：
+   ```bash
+   npm run start:launcher
+   ```
+2. 在浏览器中访问：`http://localhost:3000`
+3. 如果服务器未运行，页面会显示"启动服务器"按钮
+4. 点击按钮即可启动服务器，无需手动执行命令
+
+**方式二：前台启动（会占用终端窗口）**
 ```bash
 npm run start:web
 ```
-
 启动后，系统会自动用Chromium浏览器打开：`http://localhost:3000`
+
+**方式三：后台启动（不占用终端窗口）**
+```bash
+npm run start:web:background
+```
+- 服务器在后台运行，不占用终端窗口
+- 不会自动打开浏览器（可通过插件按钮打开）
+- 日志保存在 `logs/web-server.log`
+- 停止服务器：`npm run stop:web`
 
 **自动打开浏览器功能**：
 - ✅ 服务启动后自动用Chromium浏览器打开Web界面
