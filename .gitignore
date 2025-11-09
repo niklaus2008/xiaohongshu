@@ -46,3 +46,7 @@ Thumbs.db
 .env.development.local
 .env.test.local
 .env.production.local
+
+# 构建输出目录
+dist/
+dist-electron/
