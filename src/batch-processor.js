@@ -474,10 +474,12 @@ class BatchProcessor {
             this.globalScraper.downloadedCount = 0;
             this.globalScraper.errors = [];
             
-            // 更新实例ID，确保每个餐馆的图片文件名唯一
-            const newInstanceId = `scraper_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            this.globalScraper.instanceId = newInstanceId;
-            this.log(`🆔 更新爬虫实例ID: ${newInstanceId}`, 'info');
+            // ⚡ 关键修复：不再修改instanceId，保持浏览器Profile一致
+            // 这样可以确保所有任务共享同一个Cookie，避免重复登录
+            // 之前的代码会在每次重置时生成新的instanceId，导致创建新的浏览器Profile，丢失Cookie
+            // const newInstanceId = `scraper_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            // this.globalScraper.instanceId = newInstanceId;
+            this.log(`🔐 保持使用同一浏览器Profile，避免Cookie丢失`, 'info');
             
             // 单实例模式优化：如果登录已验证，跳过登录检查
             if (this.isLoginVerified) {
@@ -591,6 +593,17 @@ class BatchProcessor {
         // 清理全局爬虫实例
         if (this.globalScraper) {
             try {
+                // ⚡ 关键修复：关闭浏览器前先保存Cookie，确保登录状态持久化
+                this.log('💾 保存最新的登录状态...', 'info');
+                try {
+                    if (this.globalScraper.loginConfig && this.globalScraper.loginConfig.saveCookies) {
+                        await this.globalScraper.saveCookies();
+                        this.log('✅ 登录状态已保存，下次启动将自动登录', 'success');
+                    }
+                } catch (saveError) {
+                    this.log(`⚠️ 保存Cookie时出错: ${saveError.message}`, 'warning');
+                }
+                
                 this.log('🧹 清理全局爬虫实例...', 'info');
                 await this.globalScraper.close();
                 this.globalScraper = null;

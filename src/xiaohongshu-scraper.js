@@ -40,11 +40,26 @@ class XiaohongshuScraper {
             userAgent: options.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             tryRemoveWatermark: options.tryRemoveWatermark !== undefined ? options.tryRemoveWatermark : true,
             enableImageProcessing: options.enableImageProcessing !== undefined ? options.enableImageProcessing : true,
-            browserType: options.browserType || 'chromium'
+            browserType: options.browserType || 'chromium',
+            reuseBrowserProfile: options.reuseBrowserProfile !== undefined ? options.reuseBrowserProfile : true,
+            browserProfileId: options.browserProfileId || 'shared-profile'
         };
         
         // 登录配置
-        this.loginConfig = options.login || null;
+        this.loginConfig = options.login ? { ...options.login } : {};
+        this.loginConfig.method = this.loginConfig.method || 'manual';
+        if (this.loginConfig.autoLogin === undefined) {
+            this.loginConfig.autoLogin = true;
+        }
+        if (this.loginConfig.saveCookies === undefined) {
+            this.loginConfig.saveCookies = true;
+        }
+        this.loginConfig.cookieFile = this.loginConfig.cookieFile || './cookies.json';
+        this.loginConfig.storageFile = this.loginConfig.storageFile || './browser-storage.json';
+        
+        // Cookie与存储文件路径
+        this.cookieFilePath = this.loginConfig.cookieFile;
+        this.storageFilePath = this.loginConfig.storageFile;
         
         // AI服务配置
         this.aiConfig = options.ai || null;
@@ -54,6 +69,7 @@ class XiaohongshuScraper {
         }
         
         this.browser = null;
+        this.browserContext = null;
         this.page = null;
         this.downloadedCount = 0;
         this.errors = [];
@@ -328,9 +344,12 @@ class XiaohongshuScraper {
         this.log('🚀 正在创建独立的浏览器实例...', 'info');
         
         try {
-            // 为每个爬虫实例创建独立的用户数据目录，避免冲突
-            const instanceId = this.instanceId || `scraper_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            const userDataDir = path.join(process.cwd(), 'browser-data', instanceId);
+            // 为每个爬虫实例创建用户数据目录
+            const profileId = this.config.reuseBrowserProfile ? this.config.browserProfileId : (this.instanceId || `scraper_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+            const userDataDir = path.join(process.cwd(), 'browser-data', profileId);
+            await fs.ensureDir(userDataDir);
+            this.activeProfileId = profileId;
+            this.activeProfileDir = userDataDir;
             
             // 使用launchPersistentContext来支持用户数据目录
             const context = await chromium.launchPersistentContext(userDataDir, {
@@ -338,6 +357,7 @@ class XiaohongshuScraper {
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
+                    '--disable-blink-features=AutomationControlled',  // 隐藏自动化特征
                     '--disable-dev-shm-usage',
                     '--disable-accelerated-2d-canvas',
                     '--no-first-run',
@@ -346,14 +366,23 @@ class XiaohongshuScraper {
                     '--start-maximized',
                     '--disable-web-security',
                     '--disable-features=VizDisplayCompositor'
-                ]
+                ],
+                // 添加更真实的浏览器环境
+                viewport: { width: 1920, height: 1080 },
+                locale: 'zh-CN',
+                timezoneId: 'Asia/Shanghai'
             });
+            
+            this.browserContext = context;
+            // 注释掉不存在的storage恢复函数
+            // const storageData = await this.restoreBrowserStorage(context);
             
             // 从持久化上下文中获取浏览器实例
             this.browser = context.browser();
             
             // 创建新页面
             this.page = await context.newPage();
+            // await this.applyBrowserStorageToPage(this.page, storageData);
             
             // 设置超时时间
             this.page.setDefaultTimeout(this.config.timeout);
@@ -406,16 +435,19 @@ class XiaohongshuScraper {
                 this.log(`🔐 登录状态已验证，跳过登录检查，直接进行搜索`, 'info');
                 console.log(`✅ 步骤 2/8: 登录状态已验证，跳过检查`);
                 
-                // 验证当前页面登录状态，确保可以搜索
+                // ⚡ 关键修复：直接访问搜索页面，不要跳转到explore
+                // 因为Cookie在explore页面可能不生效，导致跳转到搜索页面时要求登录
                 try {
                     const currentUrl = this.page.url();
-                    if (!currentUrl.includes('xiaohongshu.com')) {
-                        console.log('🔄 当前不在小红书页面，导航到小红书首页...');
-                        await this.page.goto('https://www.xiaohongshu.com/explore', { 
+                    // 如果不在搜索页面，直接跳转到搜索页面（带测试关键词）
+                    if (!currentUrl.includes('search_result')) {
+                        console.log('🔄 当前不在搜索页面，直接导航到搜索页面验证登录...');
+                        const testSearchUrl = 'https://www.xiaohongshu.com/search_result?keyword=测试&type=51';
+                        await this.page.goto(testSearchUrl, { 
                             waitUntil: 'domcontentloaded',
                             timeout: 15000
                         });
-                        await this.page.waitForTimeout(2000);
+                        await this.page.waitForTimeout(3000); // 增加等待时间让Cookie生效
                     }
                     
                     // 检查页面是否需要重新登录
@@ -426,10 +458,10 @@ class XiaohongshuScraper {
                     });
                     
                     if (needsLogin) {
-                        console.log('⚠️ 页面显示需要登录，重新验证登录状态...');
+                        console.log('⚠️ 搜索页面显示需要登录，重新验证登录状态...');
                         this.isLoginVerified = false; // 重置登录状态
                     } else {
-                        console.log('✅ 页面登录状态正常，可以继续搜索');
+                        console.log('✅ 搜索页面登录状态正常，可以继续搜索');
                     }
                 } catch (error) {
                     console.log(`⚠️ 验证登录状态时出错: ${error.message}`);
@@ -748,12 +780,18 @@ class XiaohongshuScraper {
                 if (cookieLoaded) {
                     console.log('✅ Cookie已加载到浏览器，正在验证...');
                     
-                    // 访问小红书首页验证登录状态
-                    await this.page.goto('https://www.xiaohongshu.com/explore', { 
+                    // ⚡ 关键修复：访问搜索页面而不是explore页面验证登录
+                    // 因为搜索页面的登录验证更严格，如果搜索页面能登录，其他页面也能登录
+                    const testSearchUrl = 'https://www.xiaohongshu.com/search_result?keyword=测试&type=51';
+                    console.log('🌐 访问搜索页面验证Cookie有效性...');
+                    await this.page.goto(testSearchUrl, { 
                         waitUntil: 'domcontentloaded',
                         timeout: 30000
                     });
-                    await this.page.waitForTimeout(3000);
+                    
+                    // 等待足够长的时间让Cookie生效
+                    console.log('⏳ 等待页面完全加载和Cookie同步...');
+                    await this.page.waitForTimeout(5000);
                     
                     // ⚡ 关键修复：使用页面检测而不是Cookie文件评分
                     // 直接检查页面状态，判断Cookie是否有效
