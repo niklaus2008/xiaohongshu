@@ -25,43 +25,6 @@
             </div>
         </header>
 
-        <!-- 登录状态板块 -->
-        <div class="row mb-4">
-            <div class="col-lg-12">
-                <div class="card h-100">
-                    <div class="card-header">
-                        <h5 class="card-title mb-0">
-                            <i class="fas fa-user me-2"></i>
-                            登录状态
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div id="loginStatus" class="text-center">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">检查登录状态...</span>
-                            </div>
-                            <p class="mt-2 mb-0">正在检查登录状态...</p>
-                        </div>
-                        
-                        <div class="d-grid gap-2 mt-3">
-                            <button class="btn btn-primary" id="loginBtn" style="display: none;">
-                                <i class="fas fa-sign-in-alt me-2"></i>
-                                登录小红书
-                            </button>
-                            <button class="btn btn-outline-secondary" id="checkLoginBtn" style="display: none;">
-                                <i class="fas fa-sync me-2"></i>
-                                重新检查登录状态
-                            </button>
-                            <button class="btn btn-outline-warning btn-sm" id="resetLoginBtn" style="display: none;">
-                                <i class="fas fa-redo me-2"></i>
-                                重置登录状态
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- 配置设置板块 -->
         <div class="row mb-4">
             <div class="col-lg-12">
@@ -407,17 +370,5 @@
     <script src="/socket.io/socket.io.js"></script>
     <!-- 自定义JS -->
     <script src="js/app.js"></script>
-    <script>
-        // 页面加载时自动检测登录状态
-        document.addEventListener('DOMContentLoaded', function() {
-            // 减少延迟时间，加快响应速度
-            setTimeout(() => {
-                if (window.app && window.app.autoDetectLoginStatus) {
-                    console.log('🔍 页面加载完成，开始自动检测登录状态...');
-                    window.app.autoDetectLoginStatus();
-                }
-            }, 500); // 从1000ms减少到500ms
-        });
-    </script>
 </body>
 </html>

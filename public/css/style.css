@@ -690,11 +690,6 @@ header p {
     #configSection .col-lg-6 {
         margin-bottom: 15px;
     }
-    
-    /* 移动端登录状态板块调整 */
-    .row:first-of-type .col-lg-12 {
-        margin-bottom: 15px;
-    }
 }
 
 @media (max-width: 576px) {
@@ -966,54 +961,7 @@ header p {
     margin-bottom: 4px;
 }
 
-/* 现代登录状态样式 */
-.login-status-container {
-    text-align: center;
-    padding: 20px;
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(251, 191, 36, 0.05) 100%);
-    border-radius: 12px;
-    border: 1px solid rgba(245, 158, 11, 0.2);
-}
-
-.login-status-container .fa-2x {
-    margin-bottom: 15px;
-}
-
-.login-status-container .text-success {
-    color: #10B981 !important;
-}
-
-.login-status-container .text-warning {
-    color: #F59E0B !important;
-}
-
-.login-status-container .text-danger {
-    color: #EF4444 !important;
-}
-
-/* 登录状态板块 - 橙色主题（位于界面最顶部） */
-.row:first-of-type .col-lg-12 .card {
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(251, 191, 36, 0.05) 100%);
-    border: 1px solid rgba(245, 158, 11, 0.2);
-    border-radius: 16px;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    backdrop-filter: blur(10px);
-}
-
-.row:first-of-type .col-lg-12 .card:hover {
-    border-color: rgba(245, 158, 11, 0.4);
-    box-shadow: 0 12px 40px rgba(245, 158, 11, 0.15);
-    transform: translateY(-4px);
-}
-
-.row:first-of-type .col-lg-12 .card .card-header {
-    background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
-    color: white;
-    border-bottom: none;
-    border-radius: 16px 16px 0 0;
-    font-weight: 600;
-    padding: 20px;
-}
+/* 已移除登录状态相关样式 */
 
 
 /* 开始下载按钮 - 现代设计（在餐馆配置卡片中） */
