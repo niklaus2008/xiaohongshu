@@ -735,10 +735,15 @@ async function processDownloadQueue(config) {
                 // 等待页面加载
                 await waitForTabLoad(newTab.id);
                 
+                // 额外等待确保content script已加载
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
                 // 执行搜索
                 await executeSearch(newTab.id, restaurant, config);
             } else {
                 // 在当前页面执行搜索
+                // 确保content script已加载
+                await new Promise(resolve => setTimeout(resolve, 1000));
                 await executeSearch(tab.id, restaurant, config);
             }
             
@@ -793,11 +798,80 @@ async function processDownloadQueue(config) {
 }
 
 /**
+ * 安全地发送消息到content script（带重试机制）
+ */
+async function sendMessageToTab(tabId, message, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            // 检查标签页是否仍然存在
+            const tab = await chrome.tabs.get(tabId);
+            if (!tab) {
+                throw new Error('标签页不存在');
+            }
+            
+            // 检查标签页状态
+            if (tab.status !== 'complete') {
+                // 等待标签页加载完成
+                await new Promise((resolve) => {
+                    const listener = (updatedTabId, changeInfo) => {
+                        if (updatedTabId === tabId && changeInfo.status === 'complete') {
+                            chrome.tabs.onUpdated.removeListener(listener);
+                            resolve();
+                        }
+                    };
+                    chrome.tabs.onUpdated.addListener(listener);
+                    setTimeout(() => {
+                        chrome.tabs.onUpdated.removeListener(listener);
+                        resolve();
+                    }, 10000); // 10秒超时
+                });
+            }
+            
+            // 发送消息
+            const response = await chrome.tabs.sendMessage(tabId, message);
+            return response;
+        } catch (error) {
+            // 如果是最后一次重试，抛出错误
+            if (i === retries - 1) {
+                throw error;
+            }
+            
+            // 检查是否是消息通道关闭的错误
+            if (error.message && (
+                error.message.includes('Receiving end does not exist') ||
+                error.message.includes('message channel closed') ||
+                error.message.includes('Could not establish connection')
+            )) {
+                // 等待一段时间后重试
+                await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+                
+                // 检查content script是否已加载
+                try {
+                    const tab = await chrome.tabs.get(tabId);
+                    if (tab && tab.url && tab.url.includes('xiaohongshu.com')) {
+                        // 重新注入content script（如果需要）
+                        // 注意：manifest中已声明content script，通常会自动加载
+                        continue;
+                    } else {
+                        throw new Error('标签页不在小红书网站');
+                    }
+                } catch (tabError) {
+                    throw new Error(`标签页错误: ${tabError.message}`);
+                }
+            } else {
+                // 其他错误直接抛出
+                throw error;
+            }
+        }
+    }
+}
+
+/**
  * 执行搜索和下载
  */
 async function executeSearch(tabId, restaurant, config) {
-    // 发送搜索消息到content script
-    const searchResult = await chrome.tabs.sendMessage(tabId, {
+    // 发送搜索消息到content script（带重试）
+    const searchResult = await sendMessageToTab(tabId, {
         action: 'search',
         data: {
             restaurantName: restaurant.name,
@@ -814,8 +888,8 @@ async function executeSearch(tabId, restaurant, config) {
     // 等待一段时间让页面加载
     await new Promise(resolve => setTimeout(resolve, 3000));
     
-    // 提取图片
-    const extractResult = await chrome.tabs.sendMessage(tabId, {
+    // 提取图片（带重试）
+    const extractResult = await sendMessageToTab(tabId, {
         action: 'extractImages',
         data: {
             maxImages: config.maxImages || 6
@@ -918,8 +992,8 @@ async function downloadImages(imageUrls, restaurant, config) {
                 });
                 
                 if (tabs.length > 0) {
-                    // 在Content Script中处理图片
-                    const processedResult = await chrome.tabs.sendMessage(tabs[0].id, {
+                    // 在Content Script中处理图片（带重试）
+                    const processedResult = await sendMessageToTab(tabs[0].id, {
                         action: 'processImage',
                         data: {
                             imageUrl: imageUrl,
@@ -969,20 +1043,47 @@ async function downloadImages(imageUrls, restaurant, config) {
             console.log(`✅ 图片 ${i + 1} 下载已启动，下载ID:`, downloadId);
             downloadedCount++;
             restaurant.downloadedCount = downloadedCount;
-            sendLog(`已下载图片 ${i + 1}/${maxImages}`, 'success');
+            
+            // 发送日志和进度更新（这些函数已经处理了popup关闭的情况）
+            try {
+                sendLog(`已下载图片 ${i + 1}/${maxImages}`, 'success');
+            } catch (logError) {
+                // 静默处理日志发送错误
+                console.log(`已下载图片 ${i + 1}/${maxImages}`);
+            }
             
             // 发送进度更新
-            sendProgressUpdate();
+            try {
+                sendProgressUpdate();
+            } catch (progressError) {
+                // 静默处理进度更新错误
+            }
             
             // 延迟避免请求过快
             await new Promise(resolve => setTimeout(resolve, 1000));
             
         } catch (error) {
+            // 检查是否是连接错误（popup关闭导致的）
+            const isConnectionError = error.message && (
+                error.message.includes('Receiving end does not exist') ||
+                error.message.includes('message channel closed') ||
+                error.message.includes('Could not establish connection')
+            );
+            
+            if (isConnectionError) {
+                // 连接错误通常是popup关闭导致的，不影响下载功能
+                // 只记录到控制台，不记录为下载失败
+                console.log(`下载图片 ${i + 1} 时popup已关闭（不影响下载）`);
+                // 继续处理，不增加失败计数
+                continue;
+            }
+            
+            // 真正的下载错误才记录
             console.error('下载图片失败:', error);
             failedCount++;
             restaurant.failedCount = failedCount;
             
-            // 只记录错误到控制台，不发送到popup（避免popup关闭时的连接错误）
+            // 记录错误到控制台
             console.log(`下载图片 ${i + 1} 失败: ${error.message}`);
             
             // 发送进度更新（这个函数已经处理了popup关闭的情况）
