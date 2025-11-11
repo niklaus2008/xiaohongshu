@@ -18,9 +18,6 @@ let currentTask = null;
 
 // DOM元素
 const elements = {
-    loginStatus: document.getElementById('loginStatus'),
-    loginBtn: document.getElementById('loginBtn'),
-    checkLoginBtn: document.getElementById('checkLoginBtn'),
     maxImages: document.getElementById('maxImages'),
     removeWatermark: document.getElementById('removeWatermark'),
     enableProcessing: document.getElementById('enableProcessing'),
@@ -59,9 +56,6 @@ async function init() {
     
     // 加载餐馆列表
     await loadRestaurants();
-    
-    // 检查登录状态
-    await checkLoginStatus();
     
     // 绑定事件
     bindEvents();
@@ -138,61 +132,11 @@ async function saveRestaurants() {
     }
 }
 
-/**
- * 检查登录状态
- */
-async function checkLoginStatus() {
-    try {
-        elements.loginStatus.innerHTML = `
-            <div class="spinner"></div>
-            <p>正在检查登录状态...</p>
-        `;
-        
-        // 发送消息到background script检查登录状态
-        const response = await chrome.runtime.sendMessage({
-            action: 'checkLoginStatus'
-        });
-        
-        if (response && response.loggedIn) {
-            elements.loginStatus.innerHTML = `
-                <div class="status-success">
-                    <i class="icon-check"></i>
-                    <p>已登录</p>
-                </div>
-            `;
-            elements.loginBtn.style.display = 'none';
-            elements.checkLoginBtn.style.display = 'block';
-            updateStartButton();
-        } else {
-            elements.loginStatus.innerHTML = `
-                <div class="status-error">
-                    <i class="icon-warning"></i>
-                    <p>未登录</p>
-                </div>
-            `;
-            elements.loginBtn.style.display = 'block';
-            elements.checkLoginBtn.style.display = 'block';
-            elements.startDownloadBtn.disabled = true;
-        }
-    } catch (error) {
-        console.error('检查登录状态失败:', error);
-        elements.loginStatus.innerHTML = `
-            <div class="status-error">
-                <i class="icon-warning"></i>
-                <p>检查失败</p>
-            </div>
-        `;
-    }
-}
 
 /**
  * 绑定事件
  */
 function bindEvents() {
-    // 登录相关
-    elements.loginBtn.addEventListener('click', handleLogin);
-    elements.checkLoginBtn.addEventListener('click', checkLoginStatus);
-    
     // 配置相关
     elements.maxImages.addEventListener('change', saveConfig);
     elements.removeWatermark.addEventListener('change', saveConfig);
@@ -316,8 +260,8 @@ function renderRestaurantList() {
  */
 function updateStartButton() {
     const hasRestaurants = restaurants.length > 0;
-    const isLoggedIn = elements.loginStatus.querySelector('.status-success') !== null;
-    elements.startDownloadBtn.disabled = !hasRestaurants || !isLoggedIn || isDownloading;
+    // 移除登录状态检查，只要有餐馆就可以下载
+    elements.startDownloadBtn.disabled = !hasRestaurants || isDownloading;
 }
 
 /**
@@ -487,22 +431,6 @@ function parseJSON(text) {
     }
 }
 
-/**
- * 处理登录
- */
-async function handleLogin() {
-    try {
-        // 打开小红书登录页面
-        const tab = await chrome.tabs.create({
-            url: 'https://www.xiaohongshu.com/login'
-        });
-        
-        addLog('已打开登录页面，请完成登录后点击"重新检查登录状态"', 'info');
-    } catch (error) {
-        console.error('打开登录页面失败:', error);
-        addLog('打开登录页面失败: ' + error.message, 'error');
-    }
-}
 
 /**
  * 处理开始下载
