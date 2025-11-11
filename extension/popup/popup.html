@@ -88,6 +88,16 @@
                     <input type="text" id="aiModel" class="form-control" placeholder="glm-4-flash" value="glm-4-flash">
                     <small class="form-text">使用的AI模型名称</small>
                 </div>
+                <div class="form-group">
+                    <label for="aiRequestDelay">AI请求延迟（毫秒）</label>
+                    <input type="number" id="aiRequestDelay" class="form-control" min="2000" max="10000" value="3000">
+                    <small class="form-text">每次AI请求之间的延迟时间，避免并发限制（建议3000-5000ms，最小2000ms）</small>
+                </div>
+                <div class="form-group">
+                    <label for="aiRequestRetries">AI请求重试次数</label>
+                    <input type="number" id="aiRequestRetries" class="form-control" min="1" max="10" value="5">
+                    <small class="form-text">遇到并发错误时的重试次数（建议5-8次，会自动使用指数退避策略）</small>
+                </div>
 
                 <!-- 下载选项 -->
                 <div class="form-group">

@@ -43,6 +43,8 @@ const elements = {
     aiApiKey: document.getElementById('aiApiKey'),
     aiApiUrl: document.getElementById('aiApiUrl'),
     aiModel: document.getElementById('aiModel'),
+    aiRequestDelay: document.getElementById('aiRequestDelay'),
+    aiRequestRetries: document.getElementById('aiRequestRetries'),
     defaultDownloadPath: document.getElementById('defaultDownloadPath'),
     downloadDelay: document.getElementById('downloadDelay'),
     autoRemoveWatermark: document.getElementById('autoRemoveWatermark'),
@@ -168,6 +170,8 @@ async function loadAdvancedConfig() {
             const options = optionsResult.options;
             elements.defaultDownloadPath.value = options.defaultDownloadPath || 'downloads';
             elements.downloadDelay.value = options.downloadDelay || 1000;
+            elements.aiRequestDelay.value = options.aiRequestDelay || 3000;
+            elements.aiRequestRetries.value = options.aiRequestRetries || 5;
             elements.autoRemoveWatermark.checked = options.autoRemoveWatermark !== false;
             elements.autoProcessImage.checked = options.autoProcessImage !== false;
             elements.showNotifications.checked = options.showNotifications || false;
@@ -196,6 +200,8 @@ async function saveAdvancedConfig() {
         const options = {
             defaultDownloadPath: elements.defaultDownloadPath.value,
             downloadDelay: parseInt(elements.downloadDelay.value) || 1000,
+            aiRequestDelay: Math.max(2000, parseInt(elements.aiRequestDelay.value) || 3000),
+            aiRequestRetries: Math.max(1, Math.min(10, parseInt(elements.aiRequestRetries.value) || 5)),
             autoRemoveWatermark: elements.autoRemoveWatermark.checked,
             autoProcessImage: elements.autoProcessImage.checked,
             showNotifications: elements.showNotifications.checked,
@@ -249,6 +255,8 @@ function bindEvents() {
     elements.aiApiKey.addEventListener('change', saveAdvancedConfig);
     elements.aiApiUrl.addEventListener('change', saveAdvancedConfig);
     elements.aiModel.addEventListener('change', saveAdvancedConfig);
+    elements.aiRequestDelay.addEventListener('change', saveAdvancedConfig);
+    elements.aiRequestRetries.addEventListener('change', saveAdvancedConfig);
     elements.defaultDownloadPath.addEventListener('change', saveAdvancedConfig);
     elements.downloadDelay.addEventListener('change', saveAdvancedConfig);
     elements.autoRemoveWatermark.addEventListener('change', saveAdvancedConfig);

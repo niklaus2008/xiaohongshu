@@ -224,6 +224,165 @@ ${analysisText}`;
 console.log('✅ AI服务代码已内联加载');
 
 // ============================================================================
+// 请求队列管理器
+// ============================================================================
+
+/**
+ * AI请求队列管理器
+ * 确保所有AI API请求串行执行，避免并发限制
+ */
+class AIRequestQueue {
+    constructor() {
+        this.queue = [];
+        this.processing = false;
+        this.defaultDelay = 3000; // 默认延迟3秒（增加延迟避免并发限制）
+        this.defaultRetries = 5; // 默认重试5次（增加重试次数）
+    }
+
+    /**
+     * 设置配置
+     * @param {Object} config - 配置对象
+     * @param {number} config.delay - 请求之间的延迟（毫秒）
+     * @param {number} config.retries - 重试次数
+     */
+    setConfig(config = {}) {
+        if (config.aiRequestDelay !== undefined) {
+            // 最小延迟2秒，确保不会太快
+            this.defaultDelay = Math.max(2000, parseInt(config.aiRequestDelay) || 3000);
+        }
+        if (config.aiRequestRetries !== undefined) {
+            this.defaultRetries = Math.max(1, Math.min(10, parseInt(config.aiRequestRetries) || 5));
+        }
+        console.log('📋 请求队列配置已更新:', {
+            delay: this.defaultDelay,
+            retries: this.defaultRetries
+        });
+    }
+
+    /**
+     * 添加请求到队列
+     * @param {Function} requestFn - 返回Promise的请求函数
+     * @param {string} description - 请求描述（用于日志）
+     * @returns {Promise} 请求结果
+     */
+    async enqueue(requestFn, description = 'AI请求') {
+        return new Promise((resolve, reject) => {
+            this.queue.push({
+                requestFn,
+                description,
+                resolve,
+                reject,
+                retries: 0
+            });
+            
+            this.processQueue();
+        });
+    }
+
+    /**
+     * 处理队列
+     */
+    async processQueue() {
+        if (this.processing || this.queue.length === 0) {
+            return;
+        }
+
+        this.processing = true;
+
+        while (this.queue.length > 0) {
+            const item = this.queue.shift();
+            
+            try {
+                // 执行请求（带重试）
+                const result = await this.executeWithRetry(
+                    item.requestFn,
+                    item.description,
+                    item.retries
+                );
+                item.resolve(result);
+            } catch (error) {
+                item.reject(error);
+            }
+
+            // 请求之间的延迟（即使队列为空也延迟，确保不会连续请求过快）
+            // 这样可以避免即使只有一个请求也触发并发限制
+            if (this.queue.length > 0) {
+                await this.delay(this.defaultDelay);
+            } else {
+                // 即使队列为空，也延迟一小段时间，避免快速连续请求
+                await this.delay(Math.max(1000, this.defaultDelay / 2));
+            }
+        }
+
+        this.processing = false;
+    }
+
+    /**
+     * 执行请求（带重试机制）
+     * @param {Function} requestFn - 请求函数
+     * @param {string} description - 请求描述
+     * @param {number} currentRetries - 当前重试次数
+     * @returns {Promise} 请求结果
+     */
+    async executeWithRetry(requestFn, description, currentRetries = 0) {
+        try {
+            return await requestFn();
+        } catch (error) {
+            // 更全面的并发错误识别
+            const errorMessage = error.message || '';
+            const isConcurrencyError = (
+                errorMessage.includes('并发') ||
+                errorMessage.includes('concurrency') ||
+                errorMessage.includes('限流') ||
+                errorMessage.includes('rate limit') ||
+                errorMessage.includes('限额') ||
+                errorMessage.includes('过高') ||
+                errorMessage.includes('降低并发') ||
+                errorMessage.includes('增加限额') ||
+                errorMessage.includes('too many requests') ||
+                errorMessage.includes('429') // HTTP 429 Too Many Requests
+            );
+
+            // 如果是并发错误且还有重试次数，则重试
+            if (isConcurrencyError && currentRetries < this.defaultRetries) {
+                // 指数退避：第一次5秒，第二次10秒，第三次20秒，最多30秒
+                const baseDelay = 5000;
+                const retryDelay = Math.min(baseDelay * Math.pow(2, currentRetries), 30000);
+                
+                console.log(`⚠️ ${description} 遇到并发限制，${retryDelay}ms后重试 (${currentRetries + 1}/${this.defaultRetries})`);
+                sendLog(`遇到并发限制，${retryDelay/1000}秒后重试 (${currentRetries + 1}/${this.defaultRetries})`, 'warning');
+                
+                await this.delay(retryDelay);
+                return this.executeWithRetry(requestFn, description, currentRetries + 1);
+            }
+
+            // 其他错误或重试次数用完，直接抛出
+            throw error;
+        }
+    }
+
+    /**
+     * 延迟函数
+     * @param {number} ms - 延迟毫秒数
+     * @returns {Promise}
+     */
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    /**
+     * 清空队列
+     */
+    clear() {
+        this.queue = [];
+        this.processing = false;
+    }
+}
+
+// 创建全局请求队列实例
+const aiRequestQueue = new AIRequestQueue();
+
+// ============================================================================
 // 主程序代码
 // ============================================================================
 
@@ -1022,6 +1181,15 @@ async function performAIAnalysis(imageUrls, restaurant, config) {
     }
     
     try {
+        // 更新请求队列配置
+        const options = await chrome.storage.sync.get(['options']);
+        if (options.options) {
+            aiRequestQueue.setConfig({
+                aiRequestDelay: options.options.aiRequestDelay,
+                aiRequestRetries: options.options.aiRequestRetries
+            });
+        }
+        
         // 分析图片（最多分析5张）
         const imagesToAnalyze = imageUrls.slice(0, 5);
         sendLog(`正在分析 ${imagesToAnalyze.length} 张图片...`, 'info');
@@ -1033,9 +1201,13 @@ async function performAIAnalysis(imageUrls, restaurant, config) {
                 sendLog(`分析图片 ${i + 1}/${imagesToAnalyze.length}...`, 'info');
                 console.log(`📸 分析图片 ${i + 1}:`, imagesToAnalyze[i]);
                 
-                const result = await aiServiceInstance.analyzeImages(
-                    imagesToAnalyze[i],
-                    '请详细分析这张餐馆图片，包括：1.菜品特色 2.环境氛围 3.装修风格 4.推荐亮点 5.适合场景'
+                // 使用请求队列处理图片分析，确保串行执行
+                const result = await aiRequestQueue.enqueue(
+                    () => aiServiceInstance.analyzeImages(
+                        imagesToAnalyze[i],
+                        '请详细分析这张餐馆图片，包括：1.菜品特色 2.环境氛围 3.装修风格 4.推荐亮点 5.适合场景'
+                    ),
+                    `分析图片 ${i + 1}/${imagesToAnalyze.length}`
                 );
                 
                 if (result && result.success && result.content) {
@@ -1064,14 +1236,17 @@ async function performAIAnalysis(imageUrls, restaurant, config) {
             return { success: false, error: errorMsg };
         }
         
-        // 生成评语
+        // 生成评语（使用请求队列）
         sendLog('正在生成评语...', 'info');
         console.log('📝 开始生成评语，餐馆:', restaurant.name);
         
-        const reviewResult = await aiServiceInstance.generateReview(
-            analysisResults,
-            restaurant.name,
-            restaurant.location || ''
+        const reviewResult = await aiRequestQueue.enqueue(
+            () => aiServiceInstance.generateReview(
+                analysisResults,
+                restaurant.name,
+                restaurant.location || ''
+            ),
+            `生成评语: ${restaurant.name}`
         );
         
         if (reviewResult.success && reviewResult.review) {
