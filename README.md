@@ -605,6 +605,49 @@ if (timeSinceLastLogin < 300000) { // 5分钟内
 - ✅ **🆕 手动触发检测功能**：提供"检测登录状态"按钮
 - ✅ **🆕 智能状态同步**：每10秒和30秒自动检测跨窗口登录
 
+## 📦 Chrome扩展打包和部署
+
+### ✅ 扩展可以独立运行！
+
+**Chrome扩展已经完全独立运行，可以直接打包 `extension` 目录使用！**
+
+### 快速打包
+
+**只需要打包 `extension` 目录**：
+
+**Linux/Mac**:
+```bash
+cd /path/to/xiaohongshu
+zip -r xiaohongshu-extension.zip extension/
+```
+
+**Windows**:
+```batch
+cd /path/to/xiaohongshu
+powershell -Command "Compress-Archive -Path extension -DestinationPath xiaohongshu-extension.zip -Force"
+```
+
+### 在新电脑上部署
+
+1. **解压打包文件**（只需要 `extension` 目录）
+2. **安装Chrome扩展**：
+   - 打开 `chrome://extensions/`
+   - 开启"开发者模式"
+   - 点击"加载已解压的扩展程序"
+   - 选择解压后的 `extension` 目录
+3. **使用扩展**：
+   - 在小红书网站完成登录
+   - 点击扩展图标，配置并开始下载
+
+**注意**：
+- ✅ **不需要Node.js**
+- ✅ **不需要Web服务器**
+- ✅ **只需要Chrome浏览器**
+
+📖 **详细说明**：请查看 [extension/打包部署指南.md](./extension/打包部署指南.md)
+
+---
+
 ## 快速开始
 
 ### 1. 安装依赖
