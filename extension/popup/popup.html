@@ -39,11 +39,104 @@
                         <span>智能去除水印</span>
                     </label>
                 </div>
+            </div>
+        </section>
+
+        <!-- 高级设置板块 -->
+        <section class="section advanced-section" id="advancedSection">
+            <div class="section-header">
+                <h2>
+                    <i class="icon-settings"></i>
+                    高级设置
+                </h2>
+                <button class="section-toggle" id="advancedToggle" aria-label="展开/收起高级设置">
+                    <i class="icon-chevron-down"></i>
+                </button>
+            </div>
+            <div class="section-content" id="advancedContent" style="display: none;">
+                <!-- AI服务配置 -->
+                <div class="form-group">
+                    <label class="form-section-label">
+                        <i class="icon-ai"></i>
+                        AI服务配置
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="aiEnabled">
+                        <span>启用AI智能分析功能</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="aiApiKey">API密钥</label>
+                    <input type="password" id="aiApiKey" class="form-control" placeholder="请输入AI服务API密钥">
+                    <small class="form-text">用于调用AI服务进行图片分析</small>
+                </div>
+                <div class="form-group">
+                    <label for="aiApiUrl">API地址</label>
+                    <input type="text" id="aiApiUrl" class="form-control" placeholder="https://open.bigmodel.cn/api/paas/v4/chat/completions" value="https://open.bigmodel.cn/api/paas/v4/chat/completions">
+                    <small class="form-text">AI服务的API地址</small>
+                </div>
+                <div class="form-group">
+                    <label for="aiModel">模型名称</label>
+                    <input type="text" id="aiModel" class="form-control" placeholder="glm-4-flash" value="glm-4-flash">
+                    <small class="form-text">使用的AI模型名称</small>
+                </div>
+
+                <!-- 下载选项 -->
+                <div class="form-group">
+                    <label class="form-section-label">
+                        <i class="icon-download"></i>
+                        下载选项
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="defaultDownloadPath">默认下载路径</label>
+                    <input type="text" id="defaultDownloadPath" class="form-control" placeholder="downloads" value="downloads">
+                    <small class="form-text">图片保存的默认路径（相对于Chrome下载目录）</small>
+                </div>
+                <div class="form-group">
+                    <label for="downloadDelay">下载延迟（毫秒）</label>
+                    <input type="number" id="downloadDelay" class="form-control" min="0" max="10000" value="1000">
+                    <small class="form-text">每次下载之间的延迟时间，避免请求过快</small>
+                </div>
+
+                <!-- 图片处理选项 -->
+                <div class="form-group">
+                    <label class="form-section-label">
+                        <i class="icon-image"></i>
+                        图片处理选项
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="autoRemoveWatermark" checked>
+                        <span>自动去除水印</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="autoProcessImage" checked>
+                        <span>自动处理图片（裁剪、优化）</span>
+                    </label>
+                </div>
+
+                <!-- 其他选项 -->
+                <div class="form-group">
+                    <label class="form-section-label">
+                        <i class="icon-other"></i>
+                        其他选项
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="showNotifications">
+                        <span>显示下载通知</span>
+                    </label>
+                </div>
                 <div class="form-group" style="margin-bottom: 0;">
-                    <a href="#" id="openOptionsLink" class="link-btn">
-                        <i class="icon-options"></i>
-                        高级设置
-                    </a>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="autoOpenFolder">
+                        <span>下载完成后自动打开文件夹</span>
+                    </label>
                 </div>
             </div>
         </section>

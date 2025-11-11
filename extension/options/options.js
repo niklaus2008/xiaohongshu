@@ -18,7 +18,8 @@ const elements = {
     autoProcessImage: document.getElementById('autoProcessImage'),
     showNotifications: document.getElementById('showNotifications'),
     autoOpenFolder: document.getElementById('autoOpenFolder'),
-    saveOptionsBtn: document.getElementById('saveOptionsBtn'),
+    saveAndCloseBtn: document.getElementById('saveAndCloseBtn'),
+    saveOnlyBtn: document.getElementById('saveOnlyBtn'),
     resetOptionsBtn: document.getElementById('resetOptionsBtn'),
     exportDataBtn: document.getElementById('exportDataBtn'),
     importDataBtn: document.getElementById('importDataBtn'),
@@ -71,9 +72,11 @@ async function loadOptions() {
 }
 
 /**
- * 保存配置
+ * 保存配置（内部函数）
+ * @param {boolean} showMessage - 是否显示成功消息
+ * @returns {Promise<boolean>} 保存是否成功
  */
-async function saveOptions() {
+async function saveOptions(showMessage = true) {
     try {
         // 保存AI配置
         const aiConfig = {
@@ -95,11 +98,103 @@ async function saveOptions() {
         };
         await chrome.storage.sync.set({ options });
         
-        alert('设置已保存');
+        if (showMessage) {
+            showSuccessMessage('设置已保存');
+        }
+        return true;
     } catch (error) {
         console.error('保存配置失败:', error);
-        alert('保存配置失败: ' + error.message);
+        showErrorMessage('保存配置失败: ' + error.message);
+        return false;
     }
+}
+
+/**
+ * 保存并关闭窗口
+ */
+async function saveAndClose() {
+    const success = await saveOptions(false); // 不显示消息，因为要关闭窗口
+    if (success) {
+        // 延迟一下，确保保存完成
+        setTimeout(() => {
+            window.close();
+        }, 100);
+    }
+}
+
+/**
+ * 仅保存（不关闭窗口）
+ */
+async function saveOnly() {
+    await saveOptions(true); // 显示成功消息
+}
+
+/**
+ * 显示成功消息
+ * @param {string} message - 消息内容
+ */
+function showSuccessMessage(message) {
+    // 创建消息提示元素
+    const messageEl = document.createElement('div');
+    messageEl.className = 'message message-success';
+    messageEl.textContent = message;
+    messageEl.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #4caf50;
+        color: white;
+        padding: 12px 24px;
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        z-index: 10000;
+        animation: slideIn 0.3s ease-out;
+    `;
+    
+    document.body.appendChild(messageEl);
+    
+    // 3秒后自动移除
+    setTimeout(() => {
+        messageEl.style.animation = 'slideOut 0.3s ease-out';
+        setTimeout(() => {
+            document.body.removeChild(messageEl);
+        }, 300);
+    }, 3000);
+}
+
+/**
+ * 显示错误消息
+ * @param {string} message - 消息内容
+ */
+function showErrorMessage(message) {
+    // 创建消息提示元素
+    const messageEl = document.createElement('div');
+    messageEl.className = 'message message-error';
+    messageEl.textContent = message;
+    messageEl.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #f44336;
+        color: white;
+        padding: 12px 24px;
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        z-index: 10000;
+        animation: slideIn 0.3s ease-out;
+    `;
+    
+    document.body.appendChild(messageEl);
+    
+    // 5秒后自动移除
+    setTimeout(() => {
+        messageEl.style.animation = 'slideOut 0.3s ease-out';
+        setTimeout(() => {
+            if (document.body.contains(messageEl)) {
+                document.body.removeChild(messageEl);
+            }
+        }, 300);
+    }, 5000);
 }
 
 /**
@@ -121,8 +216,8 @@ async function resetOptions() {
         elements.showNotifications.checked = false;
         elements.autoOpenFolder.checked = false;
         
-        await saveOptions();
-        alert('已重置为默认值');
+        await saveOptions(false);
+        showSuccessMessage('已重置为默认值');
     }
 }
 
@@ -216,7 +311,8 @@ async function clearData() {
  * 绑定事件
  */
 function bindEvents() {
-    elements.saveOptionsBtn.addEventListener('click', saveOptions);
+    elements.saveAndCloseBtn.addEventListener('click', saveAndClose);
+    elements.saveOnlyBtn.addEventListener('click', saveOnly);
     elements.resetOptionsBtn.addEventListener('click', resetOptions);
     elements.exportDataBtn.addEventListener('click', exportData);
     elements.importDataBtn.addEventListener('click', importData);

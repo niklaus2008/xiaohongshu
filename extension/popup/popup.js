@@ -35,7 +35,19 @@ const elements = {
     clearLogBtn: document.getElementById('clearLogBtn'),
     configToggle: document.getElementById('configToggle'),
     configContent: document.getElementById('configContent'),
-    openOptionsLink: document.getElementById('openOptionsLink'),
+    advancedToggle: document.getElementById('advancedToggle'),
+    advancedContent: document.getElementById('advancedContent'),
+    // 高级设置元素
+    aiEnabled: document.getElementById('aiEnabled'),
+    aiApiKey: document.getElementById('aiApiKey'),
+    aiApiUrl: document.getElementById('aiApiUrl'),
+    aiModel: document.getElementById('aiModel'),
+    defaultDownloadPath: document.getElementById('defaultDownloadPath'),
+    downloadDelay: document.getElementById('downloadDelay'),
+    autoRemoveWatermark: document.getElementById('autoRemoveWatermark'),
+    autoProcessImage: document.getElementById('autoProcessImage'),
+    showNotifications: document.getElementById('showNotifications'),
+    autoOpenFolder: document.getElementById('autoOpenFolder'),
     addRestaurantModal: document.getElementById('addRestaurantModal'),
     restaurantName: document.getElementById('restaurantName'),
     restaurantLocation: document.getElementById('restaurantLocation'),
@@ -52,6 +64,9 @@ async function init() {
     
     // 加载配置
     await loadConfig();
+    
+    // 加载高级配置
+    await loadAdvancedConfig();
     
     // 加载餐馆列表
     await loadRestaurants();
@@ -131,6 +146,65 @@ async function saveRestaurants() {
     }
 }
 
+/**
+ * 加载高级配置
+ */
+async function loadAdvancedConfig() {
+    try {
+        // 加载AI配置
+        const aiConfigResult = await chrome.storage.sync.get(['aiConfig']);
+        if (aiConfigResult.aiConfig) {
+            const aiConfig = aiConfigResult.aiConfig;
+            elements.aiEnabled.checked = aiConfig.enabled || false;
+            elements.aiApiKey.value = aiConfig.apiKey || '';
+            elements.aiApiUrl.value = aiConfig.apiUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+            elements.aiModel.value = aiConfig.model || 'glm-4-flash';
+        }
+        
+        // 加载其他配置
+        const optionsResult = await chrome.storage.sync.get(['options']);
+        if (optionsResult.options) {
+            const options = optionsResult.options;
+            elements.defaultDownloadPath.value = options.defaultDownloadPath || 'downloads';
+            elements.downloadDelay.value = options.downloadDelay || 1000;
+            elements.autoRemoveWatermark.checked = options.autoRemoveWatermark !== false;
+            elements.autoProcessImage.checked = options.autoProcessImage !== false;
+            elements.showNotifications.checked = options.showNotifications || false;
+            elements.autoOpenFolder.checked = options.autoOpenFolder || false;
+        }
+    } catch (error) {
+        console.error('加载高级配置失败:', error);
+    }
+}
+
+/**
+ * 保存高级配置（静默保存）
+ */
+async function saveAdvancedConfig() {
+    try {
+        // 保存AI配置
+        const aiConfig = {
+            enabled: elements.aiEnabled.checked,
+            apiKey: elements.aiApiKey.value,
+            apiUrl: elements.aiApiUrl.value,
+            model: elements.aiModel.value
+        };
+        await chrome.storage.sync.set({ aiConfig });
+        
+        // 保存其他配置
+        const options = {
+            defaultDownloadPath: elements.defaultDownloadPath.value,
+            downloadDelay: parseInt(elements.downloadDelay.value) || 1000,
+            autoRemoveWatermark: elements.autoRemoveWatermark.checked,
+            autoProcessImage: elements.autoProcessImage.checked,
+            showNotifications: elements.showNotifications.checked,
+            autoOpenFolder: elements.autoOpenFolder.checked
+        };
+        await chrome.storage.sync.set({ options });
+    } catch (error) {
+        console.error('保存高级配置失败:', error);
+    }
+}
 
 /**
  * 绑定事件
@@ -155,11 +229,31 @@ function bindEvents() {
         toggleConfigSection();
     });
     
-    // 高级设置链接
-    elements.openOptionsLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        chrome.runtime.openOptionsPage();
+    // 折叠/展开高级设置（标题行和按钮都可以点击）
+    const advancedSection = document.getElementById('advancedSection');
+    const advancedHeader = advancedSection.querySelector('.section-header');
+    advancedHeader.addEventListener('click', (e) => {
+        if (e.target.closest('.section-toggle')) {
+            return;
+        }
+        toggleAdvancedSection();
     });
+    elements.advancedToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleAdvancedSection();
+    });
+    
+    // 高级配置相关（自动保存）
+    elements.aiEnabled.addEventListener('change', saveAdvancedConfig);
+    elements.aiApiKey.addEventListener('change', saveAdvancedConfig);
+    elements.aiApiUrl.addEventListener('change', saveAdvancedConfig);
+    elements.aiModel.addEventListener('change', saveAdvancedConfig);
+    elements.defaultDownloadPath.addEventListener('change', saveAdvancedConfig);
+    elements.downloadDelay.addEventListener('change', saveAdvancedConfig);
+    elements.autoRemoveWatermark.addEventListener('change', saveAdvancedConfig);
+    elements.autoProcessImage.addEventListener('change', saveAdvancedConfig);
+    elements.showNotifications.addEventListener('change', saveAdvancedConfig);
+    elements.autoOpenFolder.addEventListener('change', saveAdvancedConfig);
     
     // 餐馆管理
     elements.addRestaurantBtn.addEventListener('click', showAddRestaurantModal);
@@ -585,6 +679,25 @@ function toggleConfigSection() {
         content.style.display = 'none';
         toggle.classList.remove('expanded');
         toggle.setAttribute('aria-label', '展开设置');
+    }
+}
+
+/**
+ * 切换高级设置板块的折叠/展开状态
+ */
+function toggleAdvancedSection() {
+    const content = elements.advancedContent;
+    const toggle = elements.advancedToggle;
+    const isCollapsed = content.style.display === 'none';
+    
+    if (isCollapsed) {
+        content.style.display = 'block';
+        toggle.classList.add('expanded');
+        toggle.setAttribute('aria-label', '收起高级设置');
+    } else {
+        content.style.display = 'none';
+        toggle.classList.remove('expanded');
+        toggle.setAttribute('aria-label', '展开高级设置');
     }
 }
 

@@ -186,6 +186,23 @@ body {
     box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
 }
 
+.form-text {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: #666;
+}
+
+.form-section-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: #555;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
 .checkbox-label {
     display: flex;
     align-items: center;
@@ -502,6 +519,9 @@ body {
 .icon-check::before { content: "✓"; }
 .icon-warning::before { content: "⚠️"; }
 .icon-chevron-down::before { content: "▼"; }
+.icon-ai::before { content: "🤖"; }
+.icon-image::before { content: "🖼️"; }
+.icon-other::before { content: "📋"; }
 
 /* 滚动条样式 */
 ::-webkit-scrollbar {
