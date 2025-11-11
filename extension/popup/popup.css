@@ -70,10 +70,53 @@ body {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 12px;
+    cursor: pointer;
 }
 
 .section-header h2 {
     margin-bottom: 0;
+    flex: 1;
+}
+
+.section-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 8px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s;
+    font-size: 16px;
+}
+
+.section-toggle:hover {
+    color: #333;
+}
+
+.section-toggle.expanded {
+    transform: rotate(180deg);
+}
+
+.section-content {
+    margin-top: 12px;
+    animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.section-collapsed .section-content {
+    display: none;
 }
 
 /* 状态显示 */
@@ -420,6 +463,23 @@ body {
     border-top: 1px solid #f0f0f0;
 }
 
+/* 链接按钮样式 */
+.link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #667eea;
+    text-decoration: none;
+    font-size: 14px;
+    padding: 4px 0;
+    transition: color 0.2s;
+}
+
+.link-btn:hover {
+    color: #5568d3;
+    text-decoration: underline;
+}
+
 /* 图标 */
 .icon-download::before { content: "⬇️"; }
 .icon-user::before { content: "👤"; }
@@ -441,6 +501,7 @@ body {
 .icon-clear::before { content: "🗑️"; }
 .icon-check::before { content: "✓"; }
 .icon-warning::before { content: "⚠️"; }
+.icon-chevron-down::before { content: "▼"; }
 
 /* 滚动条样式 */
 ::-webkit-scrollbar {

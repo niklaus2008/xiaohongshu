@@ -17,27 +17,34 @@
             <p class="subtitle">批量下载餐馆相关图片，支持智能水印去除</p>
         </header>
 
-        <!-- 配置设置板块 -->
-        <section class="section config-section">
-            <h2>
-                <i class="icon-cog"></i>
-                配置设置
-            </h2>
-            <div class="form-group">
-                <label for="maxImages">每个餐馆下载的图片数</label>
-                <input type="number" id="maxImages" class="form-control" min="1" max="100" value="6">
+        <!-- 快速设置板块 -->
+        <section class="section config-section" id="configSection">
+            <div class="section-header">
+                <h2>
+                    <i class="icon-cog"></i>
+                    快速设置
+                </h2>
+                <button class="section-toggle" id="configToggle" aria-label="展开/收起设置">
+                    <i class="icon-chevron-down"></i>
+                </button>
             </div>
-            <div class="form-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="removeWatermark" checked>
-                    <span>智能去除水印</span>
-                </label>
-            </div>
-            <div class="form-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" id="enableProcessing" checked>
-                    <span>启用图片后处理</span>
-                </label>
+            <div class="section-content" id="configContent" style="display: none;">
+                <div class="form-group">
+                    <label for="maxImages">每个餐馆下载的图片数</label>
+                    <input type="number" id="maxImages" class="form-control" min="1" max="100" value="6">
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="removeWatermark" checked>
+                        <span>智能去除水印</span>
+                    </label>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <a href="#" id="openOptionsLink" class="link-btn">
+                        <i class="icon-options"></i>
+                        高级设置
+                    </a>
+                </div>
             </div>
         </section>
 
@@ -108,27 +115,6 @@
             <div id="logContainer" class="log-container"></div>
         </section>
 
-        <!-- 配置管理板块 -->
-        <section class="section config-management-section">
-            <h2>
-                <i class="icon-settings"></i>
-                配置管理
-            </h2>
-            <div class="button-group">
-                <button class="btn btn-secondary" id="saveConfigBtn">
-                    <i class="icon-save"></i>
-                    保存配置
-                </button>
-                <button class="btn btn-secondary" id="loadConfigBtn">
-                    <i class="icon-load"></i>
-                    加载配置
-                </button>
-                <button class="btn btn-secondary" id="openOptionsBtn">
-                    <i class="icon-options"></i>
-                    高级设置
-                </button>
-            </div>
-        </section>
     </div>
 
     <!-- 添加餐馆对话框 -->

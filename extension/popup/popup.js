@@ -20,7 +20,6 @@ let currentTask = null;
 const elements = {
     maxImages: document.getElementById('maxImages'),
     removeWatermark: document.getElementById('removeWatermark'),
-    enableProcessing: document.getElementById('enableProcessing'),
     startDownloadBtn: document.getElementById('startDownloadBtn'),
     addRestaurantBtn: document.getElementById('addRestaurantBtn'),
     importBtn: document.getElementById('importBtn'),
@@ -34,9 +33,9 @@ const elements = {
     logContainer: document.getElementById('logContainer'),
     logLevel: document.getElementById('logLevel'),
     clearLogBtn: document.getElementById('clearLogBtn'),
-    saveConfigBtn: document.getElementById('saveConfigBtn'),
-    loadConfigBtn: document.getElementById('loadConfigBtn'),
-    openOptionsBtn: document.getElementById('openOptionsBtn'),
+    configToggle: document.getElementById('configToggle'),
+    configContent: document.getElementById('configContent'),
+    openOptionsLink: document.getElementById('openOptionsLink'),
     addRestaurantModal: document.getElementById('addRestaurantModal'),
     restaurantName: document.getElementById('restaurantName'),
     restaurantLocation: document.getElementById('restaurantLocation'),
@@ -77,10 +76,9 @@ async function loadConfig() {
         const result = await chrome.storage.sync.get(['config']);
         if (result.config) {
             config = { ...config, ...result.config };
-            // 更新UI
+            // 更新UI（enableProcessing保留在存储中，但不显示在UI）
             elements.maxImages.value = config.maxImages;
             elements.removeWatermark.checked = config.removeWatermark;
-            elements.enableProcessing.checked = config.enableProcessing;
         }
     } catch (error) {
         console.error('加载配置失败:', error);
@@ -89,18 +87,19 @@ async function loadConfig() {
 }
 
 /**
- * 保存配置
+ * 保存配置（静默保存，不显示提示）
  */
 async function saveConfig() {
     try {
         config.maxImages = parseInt(elements.maxImages.value) || 6;
         config.removeWatermark = elements.removeWatermark.checked;
-        config.enableProcessing = elements.enableProcessing.checked;
+        // enableProcessing保留在存储中，但不从UI读取（已移除UI元素）
         
         await chrome.storage.sync.set({ config });
-        addLog('配置已保存', 'success');
+        // 静默保存，不显示提示
     } catch (error) {
         console.error('保存配置失败:', error);
+        // 只在错误时显示提示
         addLog('保存配置失败: ' + error.message, 'error');
     }
 }
@@ -137,10 +136,30 @@ async function saveRestaurants() {
  * 绑定事件
  */
 function bindEvents() {
-    // 配置相关
+    // 配置相关（自动保存）
     elements.maxImages.addEventListener('change', saveConfig);
     elements.removeWatermark.addEventListener('change', saveConfig);
-    elements.enableProcessing.addEventListener('change', saveConfig);
+    
+    // 折叠/展开配置（标题行和按钮都可以点击）
+    const configSection = document.getElementById('configSection');
+    const configHeader = configSection.querySelector('.section-header');
+    configHeader.addEventListener('click', (e) => {
+        // 如果点击的是按钮本身，不阻止默认行为
+        if (e.target.closest('.section-toggle')) {
+            return;
+        }
+        toggleConfigSection();
+    });
+    elements.configToggle.addEventListener('click', (e) => {
+        e.stopPropagation(); // 防止触发标题行的点击事件
+        toggleConfigSection();
+    });
+    
+    // 高级设置链接
+    elements.openOptionsLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        chrome.runtime.openOptionsPage();
+    });
     
     // 餐馆管理
     elements.addRestaurantBtn.addEventListener('click', showAddRestaurantModal);
@@ -151,13 +170,6 @@ function bindEvents() {
     
     // 下载控制
     elements.startDownloadBtn.addEventListener('click', handleStartDownload);
-    
-    // 配置管理
-    elements.saveConfigBtn.addEventListener('click', handleSaveConfig);
-    elements.loadConfigBtn.addEventListener('click', handleLoadConfig);
-    elements.openOptionsBtn.addEventListener('click', () => {
-        chrome.runtime.openOptionsPage();
-    });
     
     // 日志控制
     elements.logLevel.addEventListener('change', filterLogs);
@@ -558,62 +570,22 @@ function clearLogs() {
 }
 
 /**
- * 处理保存配置
+ * 切换配置板块的折叠/展开状态
  */
-async function handleSaveConfig() {
-    await saveConfig();
-    const data = {
-        restaurants,
-        config
-    };
+function toggleConfigSection() {
+    const content = elements.configContent;
+    const toggle = elements.configToggle;
+    const isCollapsed = content.style.display === 'none';
     
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'xiaohongshu-config.json';
-    a.click();
-    URL.revokeObjectURL(url);
-    
-    addLog('配置已导出', 'success');
-}
-
-/**
- * 处理加载配置
- */
-async function handleLoadConfig() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        
-        try {
-            const text = await file.text();
-            const data = JSON.parse(text);
-            
-            if (data.restaurants) {
-                restaurants = data.restaurants;
-                await saveRestaurants();
-            }
-            
-            if (data.config) {
-                config = { ...config, ...data.config };
-                await chrome.storage.sync.set({ config });
-                elements.maxImages.value = config.maxImages;
-                elements.removeWatermark.checked = config.removeWatermark;
-                elements.enableProcessing.checked = config.enableProcessing;
-            }
-            
-            updateUI();
-            addLog('配置已导入', 'success');
-        } catch (error) {
-            console.error('加载配置失败:', error);
-            addLog('加载配置失败: ' + error.message, 'error');
-        }
-    };
-    input.click();
+    if (isCollapsed) {
+        content.style.display = 'block';
+        toggle.classList.add('expanded');
+        toggle.setAttribute('aria-label', '收起设置');
+    } else {
+        content.style.display = 'none';
+        toggle.classList.remove('expanded');
+        toggle.setAttribute('aria-label', '展开设置');
+    }
 }
 
 /**
