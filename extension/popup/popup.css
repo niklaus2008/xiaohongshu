@@ -32,6 +32,13 @@ body {
     border-radius: 0;
 }
 
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+}
+
 .header h1 {
     font-size: 18px;
     font-weight: 600;
@@ -44,6 +51,26 @@ body {
 .subtitle {
     font-size: 12px;
     opacity: 0.9;
+}
+
+.btn-help {
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.btn-help:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
 }
 
 /* 区块 */
@@ -522,6 +549,7 @@ body {
 .icon-ai::before { content: "🤖"; }
 .icon-image::before { content: "🖼️"; }
 .icon-other::before { content: "📋"; }
+.icon-help::before { content: "❓"; }
 
 /* 滚动条样式 */
 ::-webkit-scrollbar {

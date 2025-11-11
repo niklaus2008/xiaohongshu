@@ -33,6 +33,7 @@ const elements = {
     logContainer: document.getElementById('logContainer'),
     logLevel: document.getElementById('logLevel'),
     clearLogBtn: document.getElementById('clearLogBtn'),
+    helpBtn: document.getElementById('helpBtn'),
     configToggle: document.getElementById('configToggle'),
     configContent: document.getElementById('configContent'),
     advancedToggle: document.getElementById('advancedToggle'),
@@ -268,6 +269,13 @@ function bindEvents() {
     // 日志控制
     elements.logLevel.addEventListener('change', filterLogs);
     elements.clearLogBtn.addEventListener('click', clearLogs);
+    
+    // 帮助按钮
+    elements.helpBtn.addEventListener('click', () => {
+        chrome.tabs.create({
+            url: chrome.runtime.getURL('help/help.html')
+        });
+    });
 }
 
 /**
