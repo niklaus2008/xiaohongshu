@@ -120,7 +120,7 @@ async function startServer() {
             type: 'basic',
             iconUrl: chrome.runtime.getURL('assets/icons/icon48.png'),
             title: '需要启动服务器',
-            message: '请在终端运行: npm run start:web:background',
+            message: '请在项目目录的终端运行: npm run start:web:background (详细说明请查看README.md)',
             buttons: [
                 { title: '复制命令' }
             ]
@@ -186,7 +186,7 @@ chrome.action.onClicked.addListener(async (tab) => {
                 type: 'basic',
                 iconUrl: chrome.runtime.getURL('assets/icons/icon48.png'),
                 title: '需要启动服务器',
-                message: '请在终端运行: npm run start:web:background',
+                message: '请在项目目录的终端运行: npm run start:web:background (详细说明请查看README.md)',
                 priority: 2
             });
             
