@@ -66,28 +66,86 @@ const elements = {
 async function init() {
     console.log('初始化Popup界面...');
     
-    // 加载配置
-    await loadConfig();
-    
-    // 加载高级配置
-    await loadAdvancedConfig();
-    
-    // 加载餐馆列表
-    await loadRestaurants();
-    
-    // 检查是否有正在进行的下载任务
-    await checkDownloadStatus();
-    
-    // 绑定事件
-    bindEvents();
-    
-    // 监听消息
-    setupMessageListeners();
-    
-    // 更新UI
-    updateUI();
-    
-    console.log('Popup界面初始化完成');
+    try {
+        // 1. 先加载所有配置（确保配置完全加载）
+        await loadConfig();
+        await loadAdvancedConfig();
+        await loadRestaurants();
+        
+        // 2. 检查是否有正在进行的下载任务
+        await checkDownloadStatus();
+        
+        // 3. 配置加载完成后再绑定事件（避免事件触发时配置未加载）
+        bindEvents();
+        
+        // 4. 设置配置同步监听
+        setupConfigSync();
+        
+        // 5. 监听消息
+        setupMessageListeners();
+        
+        // 6. 更新UI
+        updateUI();
+        
+        console.log('✅ Popup界面初始化完成');
+    } catch (error) {
+        console.error('❌ Popup界面初始化失败:', error);
+        addLog('初始化失败: ' + error.message, 'error');
+    }
+}
+
+/**
+ * 设置配置同步监听
+ */
+function setupConfigSync() {
+    // 监听storage变化，自动更新UI
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === 'sync') {
+            // 配置变化
+            if (changes.config) {
+                console.log('检测到配置变化，重新加载...');
+                loadConfig().then(() => {
+                    updateUI();
+                });
+            }
+            
+            // AI配置变化（从sync，需要迁移到local）
+            if (changes.aiConfig) {
+                console.log('检测到AI配置变化（sync），迁移到local...');
+                // 将sync的配置迁移到local
+                chrome.storage.sync.get(['aiConfig']).then(result => {
+                    if (result.aiConfig) {
+                        chrome.storage.local.set({ aiConfig: result.aiConfig });
+                        chrome.storage.sync.remove(['aiConfig']);
+                    }
+                });
+                loadAdvancedConfig();
+            }
+        }
+        
+        // 监听local存储变化（AI配置主要存储在local）
+        if (areaName === 'local') {
+            // AI配置变化（从local）
+            if (changes.aiConfig) {
+                console.log('检测到AI配置变化（local），重新加载...');
+                loadAdvancedConfig();
+            }
+            
+            // 选项配置变化
+            if (changes.options) {
+                console.log('检测到选项配置变化，重新加载...');
+                loadAdvancedConfig();
+            }
+        }
+        
+        // 餐馆列表变化（local storage）
+        if (areaName === 'local' && changes.restaurants) {
+            console.log('检测到餐馆列表变化，重新加载...');
+            loadRestaurants().then(() => {
+                updateUI();
+            });
+        }
+    });
 }
 
 /**
@@ -140,20 +198,65 @@ async function checkDownloadStatus() {
 }
 
 /**
+ * 获取默认配置
+ */
+function getDefaultConfig() {
+    return {
+        maxImages: 6,
+        removeWatermark: true,
+        enableProcessing: true
+    };
+}
+
+/**
+ * 验证配置完整性
+ */
+function validateConfig(configData) {
+    const defaultConfig = getDefaultConfig();
+    const validated = { ...defaultConfig, ...configData };
+    
+    // 验证必需字段
+    if (typeof validated.maxImages !== 'number' || validated.maxImages < 1) {
+        validated.maxImages = defaultConfig.maxImages;
+    }
+    if (typeof validated.removeWatermark !== 'boolean') {
+        validated.removeWatermark = defaultConfig.removeWatermark;
+    }
+    if (typeof validated.enableProcessing !== 'boolean') {
+        validated.enableProcessing = defaultConfig.enableProcessing;
+    }
+    
+    return validated;
+}
+
+/**
  * 加载配置
  */
 async function loadConfig() {
     try {
         const result = await chrome.storage.sync.get(['config']);
         if (result.config) {
-            config = { ...config, ...result.config };
-            // 更新UI（enableProcessing保留在存储中，但不显示在UI）
-            elements.maxImages.value = config.maxImages;
-            elements.removeWatermark.checked = config.removeWatermark;
+            // 验证并合并配置
+            config = validateConfig(result.config);
+            console.log('✅ 配置加载成功:', config);
+        } else {
+            // 使用默认配置
+            config = getDefaultConfig();
+            console.log('ℹ️ 使用默认配置');
+            // 保存默认配置
+            await chrome.storage.sync.set({ config });
         }
+        
+        // 更新UI
+        elements.maxImages.value = config.maxImages;
+        elements.removeWatermark.checked = config.removeWatermark;
     } catch (error) {
         console.error('加载配置失败:', error);
-        addLog('加载配置失败: ' + error.message, 'error');
+        // 使用默认配置
+        config = getDefaultConfig();
+        elements.maxImages.value = config.maxImages;
+        elements.removeWatermark.checked = config.removeWatermark;
+        addLog('加载配置失败，已使用默认配置: ' + error.message, 'warning');
     }
 }
 
@@ -162,16 +265,27 @@ async function loadConfig() {
  */
 async function saveConfig() {
     try {
+        // 从UI读取配置
         config.maxImages = parseInt(elements.maxImages.value) || 6;
         config.removeWatermark = elements.removeWatermark.checked;
         // enableProcessing保留在存储中，但不从UI读取（已移除UI元素）
         
+        // 验证配置
+        config = validateConfig(config);
+        
+        // 保存到storage
         await chrome.storage.sync.set({ config });
-        // 静默保存，不显示提示
+        console.log('✅ 配置已保存:', config);
     } catch (error) {
         console.error('保存配置失败:', error);
-        // 只在错误时显示提示
-        addLog('保存配置失败: ' + error.message, 'error');
+        // 重试一次
+        try {
+            await chrome.storage.sync.set({ config });
+            console.log('✅ 配置保存重试成功');
+        } catch (retryError) {
+            console.error('配置保存重试失败:', retryError);
+            addLog('保存配置失败: ' + error.message, 'error');
+        }
     }
 }
 
@@ -203,35 +317,173 @@ async function saveRestaurants() {
 }
 
 /**
+ * 获取默认AI配置
+ */
+function getDefaultAIConfig() {
+    return {
+        enabled: false,
+        apiKey: '',
+        apiUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+        model: 'glm-4-flash'
+    };
+}
+
+/**
+ * 获取默认选项配置
+ */
+function getDefaultOptions() {
+    return {
+        defaultDownloadPath: 'downloads',
+        downloadDelay: 1000,
+        aiRequestDelay: 2000, // 最小2000ms，但HTML默认是3000，会在加载时处理
+        aiRequestRetries: 3,
+        autoRemoveWatermark: true,
+        autoProcessImage: true,
+        showNotifications: false,
+        autoOpenFolder: false
+    };
+}
+
+/**
+ * 验证AI配置
+ */
+function validateAIConfig(aiConfigData) {
+    const defaultConfig = getDefaultAIConfig();
+    const validated = { ...defaultConfig, ...aiConfigData };
+    
+    if (typeof validated.enabled !== 'boolean') {
+        validated.enabled = defaultConfig.enabled;
+    }
+    if (typeof validated.apiKey !== 'string') {
+        validated.apiKey = defaultConfig.apiKey;
+    }
+    if (typeof validated.apiUrl !== 'string' || !validated.apiUrl) {
+        validated.apiUrl = defaultConfig.apiUrl;
+    }
+    if (typeof validated.model !== 'string' || !validated.model) {
+        validated.model = defaultConfig.model;
+    }
+    
+    return validated;
+}
+
+/**
+ * 验证选项配置
+ */
+function validateOptions(optionsData) {
+    const defaultOptions = getDefaultOptions();
+    const validated = { ...defaultOptions, ...optionsData };
+    
+    if (typeof validated.defaultDownloadPath !== 'string' || !validated.defaultDownloadPath) {
+        validated.defaultDownloadPath = defaultOptions.defaultDownloadPath;
+    }
+    if (typeof validated.downloadDelay !== 'number' || validated.downloadDelay < 0) {
+        validated.downloadDelay = defaultOptions.downloadDelay;
+    }
+    if (typeof validated.aiRequestDelay !== 'number' || validated.aiRequestDelay < 1000) {
+        validated.aiRequestDelay = defaultOptions.aiRequestDelay;
+    }
+    if (typeof validated.aiRequestRetries !== 'number' || validated.aiRequestRetries < 1 || validated.aiRequestRetries > 10) {
+        validated.aiRequestRetries = defaultOptions.aiRequestRetries;
+    }
+    if (typeof validated.autoRemoveWatermark !== 'boolean') {
+        validated.autoRemoveWatermark = defaultOptions.autoRemoveWatermark;
+    }
+    if (typeof validated.autoProcessImage !== 'boolean') {
+        validated.autoProcessImage = defaultOptions.autoProcessImage;
+    }
+    if (typeof validated.showNotifications !== 'boolean') {
+        validated.showNotifications = defaultOptions.showNotifications;
+    }
+    if (typeof validated.autoOpenFolder !== 'boolean') {
+        validated.autoOpenFolder = defaultOptions.autoOpenFolder;
+    }
+    
+    return validated;
+}
+
+/**
  * 加载高级配置
  */
 async function loadAdvancedConfig() {
     try {
-        // 加载AI配置
-        const aiConfigResult = await chrome.storage.sync.get(['aiConfig']);
-        if (aiConfigResult.aiConfig) {
-            const aiConfig = aiConfigResult.aiConfig;
-            elements.aiEnabled.checked = aiConfig.enabled || false;
-            elements.aiApiKey.value = aiConfig.apiKey || '';
-            elements.aiApiUrl.value = aiConfig.apiUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
-            elements.aiModel.value = aiConfig.model || 'glm-4-flash';
+        // 加载AI配置（使用local存储以确保持久化，特别是API密钥）
+        // 先尝试从local加载（持久化存储）
+        let aiConfigResult = await chrome.storage.local.get(['aiConfig']);
+        let aiConfig;
+        
+        // 如果local中没有，尝试从sync加载（兼容旧版本）
+        if (!aiConfigResult.aiConfig) {
+            const syncResult = await chrome.storage.sync.get(['aiConfig']);
+            if (syncResult.aiConfig) {
+                // 从sync迁移到local
+                aiConfig = validateAIConfig(syncResult.aiConfig);
+                await chrome.storage.local.set({ aiConfig });
+                // 清除sync中的配置（避免重复）
+                await chrome.storage.sync.remove(['aiConfig']);
+                console.log('✅ AI配置已从sync迁移到local');
+            }
         }
+        
+        if (aiConfigResult.aiConfig) {
+            aiConfig = validateAIConfig(aiConfigResult.aiConfig);
+            console.log('✅ AI配置加载成功（从local）');
+        } else if (!aiConfig) {
+            aiConfig = getDefaultAIConfig();
+            console.log('ℹ️ 使用默认AI配置');
+            // 保存默认AI配置到local
+            await chrome.storage.local.set({ aiConfig });
+        }
+        
+        // 更新AI配置UI
+        elements.aiEnabled.checked = aiConfig.enabled;
+        elements.aiApiKey.value = aiConfig.apiKey;
+        elements.aiApiUrl.value = aiConfig.apiUrl;
+        elements.aiModel.value = aiConfig.model;
         
         // 加载其他配置
         const optionsResult = await chrome.storage.sync.get(['options']);
+        let options;
         if (optionsResult.options) {
-            const options = optionsResult.options;
-            elements.defaultDownloadPath.value = options.defaultDownloadPath || 'downloads';
-            elements.downloadDelay.value = options.downloadDelay || 1000;
-            elements.aiRequestDelay.value = options.aiRequestDelay || 3000;
-            elements.aiRequestRetries.value = options.aiRequestRetries || 5;
-            elements.autoRemoveWatermark.checked = options.autoRemoveWatermark !== false;
-            elements.autoProcessImage.checked = options.autoProcessImage !== false;
-            elements.showNotifications.checked = options.showNotifications || false;
-            elements.autoOpenFolder.checked = options.autoOpenFolder || false;
+            options = validateOptions(optionsResult.options);
+            console.log('✅ 选项配置加载成功');
+        } else {
+            options = getDefaultOptions();
+            console.log('ℹ️ 使用默认选项配置');
+            // 保存默认选项配置
+            await chrome.storage.sync.set({ options });
         }
+        
+        // 更新选项配置UI（确保值在有效范围内）
+        elements.defaultDownloadPath.value = options.defaultDownloadPath || 'downloads';
+        elements.downloadDelay.value = Math.max(0, options.downloadDelay || 1000);
+        elements.aiRequestDelay.value = Math.max(2000, options.aiRequestDelay || 2000);
+        elements.aiRequestRetries.value = Math.max(1, Math.min(10, options.aiRequestRetries || 3));
+        elements.autoRemoveWatermark.checked = options.autoRemoveWatermark !== false;
+        elements.autoProcessImage.checked = options.autoProcessImage !== false;
+        elements.showNotifications.checked = options.showNotifications || false;
+        elements.autoOpenFolder.checked = options.autoOpenFolder || false;
     } catch (error) {
         console.error('加载高级配置失败:', error);
+        // 使用默认配置
+        const defaultAIConfig = getDefaultAIConfig();
+        const defaultOptions = getDefaultOptions();
+        
+        elements.aiEnabled.checked = defaultAIConfig.enabled;
+        elements.aiApiKey.value = defaultAIConfig.apiKey;
+        elements.aiApiUrl.value = defaultAIConfig.apiUrl;
+        elements.aiModel.value = defaultAIConfig.model;
+        
+        elements.defaultDownloadPath.value = defaultOptions.defaultDownloadPath;
+        elements.downloadDelay.value = defaultOptions.downloadDelay;
+        elements.aiRequestDelay.value = defaultOptions.aiRequestDelay;
+        elements.aiRequestRetries.value = defaultOptions.aiRequestRetries;
+        elements.autoRemoveWatermark.checked = defaultOptions.autoRemoveWatermark;
+        elements.autoProcessImage.checked = defaultOptions.autoProcessImage;
+        elements.showNotifications.checked = defaultOptions.showNotifications;
+        elements.autoOpenFolder.checked = defaultOptions.autoOpenFolder;
+        
+        addLog('加载高级配置失败，已使用默认配置: ' + error.message, 'warning');
     }
 }
 
@@ -240,29 +492,70 @@ async function loadAdvancedConfig() {
  */
 async function saveAdvancedConfig() {
     try {
-        // 保存AI配置
-        const aiConfig = {
+        // 从UI读取AI配置
+        const aiConfigData = {
             enabled: elements.aiEnabled.checked,
-            apiKey: elements.aiApiKey.value,
-            apiUrl: elements.aiApiUrl.value,
-            model: elements.aiModel.value
+            apiKey: elements.aiApiKey.value || '',
+            apiUrl: elements.aiApiUrl.value || 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+            model: elements.aiModel.value || 'glm-4-flash'
         };
-        await chrome.storage.sync.set({ aiConfig });
         
-        // 保存其他配置
-        const options = {
-            defaultDownloadPath: elements.defaultDownloadPath.value,
+        // 验证并保存AI配置（使用local存储以确保持久化）
+        const aiConfig = validateAIConfig(aiConfigData);
+        await chrome.storage.local.set({ aiConfig });
+        console.log('✅ AI配置已保存到local存储');
+        
+        // 同时保存到sync（用于跨设备同步，但local是主要存储）
+        try {
+            await chrome.storage.sync.set({ aiConfig });
+        } catch (syncError) {
+            // sync存储可能失败（配额限制），不影响主要功能
+            console.warn('AI配置同步到sync失败（不影响使用）:', syncError);
+        }
+        
+        // 从UI读取选项配置
+        const optionsData = {
+            defaultDownloadPath: elements.defaultDownloadPath.value || 'downloads',
             downloadDelay: parseInt(elements.downloadDelay.value) || 1000,
-            aiRequestDelay: Math.max(2000, parseInt(elements.aiRequestDelay.value) || 3000),
-            aiRequestRetries: Math.max(1, Math.min(10, parseInt(elements.aiRequestRetries.value) || 5)),
+            aiRequestDelay: parseInt(elements.aiRequestDelay.value) || 2000,
+            aiRequestRetries: parseInt(elements.aiRequestRetries.value) || 3,
             autoRemoveWatermark: elements.autoRemoveWatermark.checked,
             autoProcessImage: elements.autoProcessImage.checked,
             showNotifications: elements.showNotifications.checked,
             autoOpenFolder: elements.autoOpenFolder.checked
         };
+        
+        // 验证并保存选项配置
+        const options = validateOptions(optionsData);
         await chrome.storage.sync.set({ options });
+        console.log('✅ 选项配置已保存');
     } catch (error) {
         console.error('保存高级配置失败:', error);
+        // 重试一次
+        try {
+            const aiConfig = validateAIConfig({
+                enabled: elements.aiEnabled.checked,
+                apiKey: elements.aiApiKey.value || '',
+                apiUrl: elements.aiApiUrl.value || 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+                model: elements.aiModel.value || 'glm-4-flash'
+            });
+            const options = validateOptions({
+                defaultDownloadPath: elements.defaultDownloadPath.value || 'downloads',
+                downloadDelay: parseInt(elements.downloadDelay.value) || 1000,
+                aiRequestDelay: parseInt(elements.aiRequestDelay.value) || 2000,
+                aiRequestRetries: parseInt(elements.aiRequestRetries.value) || 3,
+                autoRemoveWatermark: elements.autoRemoveWatermark.checked,
+                autoProcessImage: elements.autoProcessImage.checked,
+                showNotifications: elements.showNotifications.checked,
+                autoOpenFolder: elements.autoOpenFolder.checked
+            });
+            // 保存到local（主要存储）
+            await chrome.storage.local.set({ aiConfig });
+            await chrome.storage.sync.set({ options });
+            console.log('✅ 高级配置保存重试成功');
+        } catch (retryError) {
+            console.error('高级配置保存重试失败:', retryError);
+        }
     }
 }
 
@@ -767,9 +1060,24 @@ async function handleStartDownload() {
     // 保存当前配置
     await saveConfig();
     
-    // 读取AI配置
-    const aiConfigResult = await chrome.storage.sync.get(['aiConfig']);
-    const aiConfig = aiConfigResult.aiConfig || {};
+    // 读取AI配置（从local读取，持久化存储）
+    let aiConfigResult = await chrome.storage.local.get(['aiConfig']);
+    let aiConfig = aiConfigResult.aiConfig;
+    
+    // 如果local中没有，尝试从sync读取（兼容旧版本）
+    if (!aiConfig) {
+        const syncResult = await chrome.storage.sync.get(['aiConfig']);
+        if (syncResult.aiConfig) {
+            // 从sync迁移到local
+            aiConfig = syncResult.aiConfig;
+            await chrome.storage.local.set({ aiConfig });
+            await chrome.storage.sync.remove(['aiConfig']);
+        }
+    }
+    
+    if (!aiConfig) {
+        aiConfig = {};
+    }
     
     // 构建完整的配置对象
     const fullConfig = {

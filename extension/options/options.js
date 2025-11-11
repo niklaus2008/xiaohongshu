@@ -46,13 +46,27 @@ async function init() {
  */
 async function loadOptions() {
     try {
-        // 加载AI配置
-        const aiConfig = await chrome.storage.sync.get(['aiConfig']);
-        if (aiConfig.aiConfig) {
-            elements.aiEnabled.checked = aiConfig.aiConfig.enabled || false;
-            elements.aiApiKey.value = aiConfig.aiConfig.apiKey || '';
-            elements.aiApiUrl.value = aiConfig.aiConfig.apiUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
-            elements.aiModel.value = aiConfig.aiConfig.model || 'glm-4-flash';
+        // 加载AI配置（从local读取，持久化存储）
+        let result = await chrome.storage.local.get(['aiConfig']);
+        let aiConfig = result.aiConfig;
+        
+        // 如果local中没有，尝试从sync读取（兼容旧版本）
+        if (!aiConfig) {
+            const syncResult = await chrome.storage.sync.get(['aiConfig']);
+            if (syncResult.aiConfig) {
+                // 从sync迁移到local
+                aiConfig = syncResult.aiConfig;
+                await chrome.storage.local.set({ aiConfig });
+                await chrome.storage.sync.remove(['aiConfig']);
+                console.log('✅ AI配置已从sync迁移到local');
+            }
+        }
+        
+        if (aiConfig) {
+            elements.aiEnabled.checked = aiConfig.enabled || false;
+            elements.aiApiKey.value = aiConfig.apiKey || '';
+            elements.aiApiUrl.value = aiConfig.apiUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+            elements.aiModel.value = aiConfig.model || 'glm-4-flash';
         }
         
         // 加载其他配置
@@ -78,14 +92,20 @@ async function loadOptions() {
  */
 async function saveOptions(showMessage = true) {
     try {
-        // 保存AI配置
+        // 保存AI配置（保存到local以确保持久化）
         const aiConfig = {
             enabled: elements.aiEnabled.checked,
             apiKey: elements.aiApiKey.value,
             apiUrl: elements.aiApiUrl.value,
             model: elements.aiModel.value
         };
-        await chrome.storage.sync.set({ aiConfig });
+        await chrome.storage.local.set({ aiConfig });
+        // 同时尝试保存到sync（用于跨设备同步，但local是主要存储）
+        try {
+            await chrome.storage.sync.set({ aiConfig });
+        } catch (syncError) {
+            console.warn('AI配置同步到sync失败（不影响使用）:', syncError);
+        }
         
         // 保存其他配置
         const options = {
@@ -226,9 +246,10 @@ async function resetOptions() {
  */
 async function exportData() {
     try {
+        // 导出数据时，AI配置从local读取（主要存储）
         const data = {
             config: await chrome.storage.sync.get(['config']),
-            aiConfig: await chrome.storage.sync.get(['aiConfig']),
+            aiConfig: await chrome.storage.local.get(['aiConfig']), // 从local读取
             options: await chrome.storage.sync.get(['options']),
             restaurants: await chrome.storage.local.get(['restaurants']),
             downloadHistory: await chrome.storage.local.get(['downloadHistory'])
@@ -268,7 +289,14 @@ async function importData() {
                 await chrome.storage.sync.set({ config: data.config.config });
             }
             if (data.aiConfig) {
-                await chrome.storage.sync.set({ aiConfig: data.aiConfig.aiConfig });
+                // 保存到local以确保持久化
+                await chrome.storage.local.set({ aiConfig: data.aiConfig.aiConfig });
+                // 同时尝试保存到sync
+                try {
+                    await chrome.storage.sync.set({ aiConfig: data.aiConfig.aiConfig });
+                } catch (syncError) {
+                    console.warn('AI配置同步到sync失败（不影响使用）:', syncError);
+                }
             }
             if (data.options) {
                 await chrome.storage.sync.set({ options: data.options.options });

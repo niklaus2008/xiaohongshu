@@ -406,14 +406,28 @@ async function initAIService() {
             return;
         }
         
-        const result = await chrome.storage.sync.get(['aiConfig']);
-        const aiConfig = result.aiConfig;
+        // 从local读取AI配置（持久化存储）
+        let result = await chrome.storage.local.get(['aiConfig']);
+        let aiConfig = result.aiConfig;
+        
+        // 如果local中没有，尝试从sync读取（兼容旧版本）
+        if (!aiConfig) {
+            const syncResult = await chrome.storage.sync.get(['aiConfig']);
+            if (syncResult.aiConfig) {
+                // 从sync迁移到local
+                aiConfig = syncResult.aiConfig;
+                await chrome.storage.local.set({ aiConfig });
+                await chrome.storage.sync.remove(['aiConfig']);
+                console.log('✅ AI配置已从sync迁移到local');
+            }
+        }
         
         console.log('🔍 检查AI配置:', {
             hasConfig: !!aiConfig,
             enabled: aiConfig?.enabled,
             hasApiKey: !!aiConfig?.apiKey,
-            apiKeyLength: aiConfig?.apiKey?.length || 0
+            apiKeyLength: aiConfig?.apiKey?.length || 0,
+            storage: aiConfig ? 'local' : 'none'
         });
         
         if (aiConfig && aiConfig.enabled && aiConfig.apiKey) {
@@ -481,10 +495,25 @@ async function initAIService() {
             return;
         }
         
-        const aiConfig = await chrome.storage.sync.get(['aiConfig']);
-        if (aiConfig.aiConfig && aiConfig.aiConfig.enabled && aiConfig.aiConfig.apiKey) {
+        // 从local读取AI配置（持久化存储）
+        let result = await chrome.storage.local.get(['aiConfig']);
+        let aiConfig = result.aiConfig;
+        
+        // 如果local中没有，尝试从sync读取（兼容旧版本）
+        if (!aiConfig) {
+            const syncResult = await chrome.storage.sync.get(['aiConfig']);
+            if (syncResult.aiConfig) {
+                // 从sync迁移到local
+                aiConfig = syncResult.aiConfig;
+                await chrome.storage.local.set({ aiConfig });
+                await chrome.storage.sync.remove(['aiConfig']);
+                console.log('✅ AI配置已从sync迁移到local');
+            }
+        }
+        
+        if (aiConfig && aiConfig.enabled && aiConfig.apiKey) {
             try {
-                aiServiceInstance = new AIService(aiConfig.aiConfig);
+                aiServiceInstance = new AIService(aiConfig);
                 console.log('✅ AI服务已初始化');
             } catch (error) {
                 console.error('创建AI服务实例失败:', error);
@@ -657,8 +686,14 @@ async function handleStartDownload(data) {
     // 如果启用AI，确保AI服务已初始化
     if (config.enableAI && config.aiConfig) {
         console.log('🔧 检查AI服务配置...');
-        // 更新AI配置
-        await chrome.storage.sync.set({ aiConfig: config.aiConfig });
+        // 更新AI配置（保存到local以确保持久化）
+        await chrome.storage.local.set({ aiConfig: config.aiConfig });
+        // 同时尝试保存到sync（用于跨设备同步，但local是主要存储）
+        try {
+            await chrome.storage.sync.set({ aiConfig: config.aiConfig });
+        } catch (syncError) {
+            console.warn('AI配置同步到sync失败（不影响使用）:', syncError);
+        }
         // 重新初始化AI服务（代码已内联）
         await initAIService();
         

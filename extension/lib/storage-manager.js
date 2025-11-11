@@ -64,12 +64,26 @@ class StorageManager {
     }
 
     /**
-     * 获取AI配置
+     * 获取AI配置（从local读取，持久化存储）
      */
     static async getAIConfig() {
         try {
-            const result = await chrome.storage.sync.get(['aiConfig']);
-            return result.aiConfig || null;
+            // 从local读取（主要存储）
+            let result = await chrome.storage.local.get(['aiConfig']);
+            let aiConfig = result.aiConfig;
+            
+            // 如果local中没有，尝试从sync读取（兼容旧版本）
+            if (!aiConfig) {
+                const syncResult = await chrome.storage.sync.get(['aiConfig']);
+                if (syncResult.aiConfig) {
+                    // 从sync迁移到local
+                    aiConfig = syncResult.aiConfig;
+                    await chrome.storage.local.set({ aiConfig });
+                    await chrome.storage.sync.remove(['aiConfig']);
+                }
+            }
+            
+            return aiConfig || null;
         } catch (error) {
             console.error('获取AI配置失败:', error);
             return null;
@@ -77,11 +91,18 @@ class StorageManager {
     }
 
     /**
-     * 保存AI配置
+     * 保存AI配置（保存到local以确保持久化）
      */
     static async saveAIConfig(aiConfig) {
         try {
-            await chrome.storage.sync.set({ aiConfig });
+            // 保存到local（主要存储）
+            await chrome.storage.local.set({ aiConfig });
+            // 同时尝试保存到sync（用于跨设备同步，但local是主要存储）
+            try {
+                await chrome.storage.sync.set({ aiConfig });
+            } catch (syncError) {
+                console.warn('AI配置同步到sync失败（不影响使用）:', syncError);
+            }
             return true;
         } catch (error) {
             console.error('保存AI配置失败:', error);
