@@ -177,17 +177,72 @@
         try {
             // 加载ImageProcessor（如果已加载）
             if (typeof ImageProcessor === 'undefined') {
-                // 尝试从lib目录加载
-                const script = document.createElement('script');
-                script.src = chrome.runtime.getURL('lib/image-processor.js');
-                document.head.appendChild(script);
-                
-                // 等待脚本加载
-                await new Promise((resolve, reject) => {
-                    script.onload = resolve;
-                    script.onerror = reject;
-                    setTimeout(reject, 5000); // 5秒超时
-                });
+                // 检查脚本是否已经在加载中
+                const existingScript = document.querySelector('script[src*="image-processor.js"]');
+                if (existingScript) {
+                    // 等待现有脚本加载完成
+                    await new Promise((resolve, reject) => {
+                        const checkInterval = setInterval(() => {
+                            if (typeof ImageProcessor !== 'undefined') {
+                                clearInterval(checkInterval);
+                                resolve();
+                            }
+                        }, 100);
+                        setTimeout(() => {
+                            clearInterval(checkInterval);
+                            if (typeof ImageProcessor === 'undefined') {
+                                reject(new Error('ImageProcessor加载超时'));
+                            } else {
+                                resolve();
+                            }
+                        }, 5000);
+                    });
+                } else {
+                    // 尝试从lib目录加载
+                    try {
+                        const script = document.createElement('script');
+                        script.src = chrome.runtime.getURL('lib/image-processor.js');
+                        
+                        // 改进错误处理
+                        await new Promise((resolve, reject) => {
+                            script.onload = () => {
+                                // 等待一小段时间确保ImageProcessor已定义
+                                setTimeout(() => {
+                                    if (typeof ImageProcessor !== 'undefined') {
+                                        resolve();
+                                    } else {
+                                        reject(new Error('ImageProcessor未定义'));
+                                    }
+                                }, 100);
+                            };
+                            script.onerror = (error) => {
+                                // 静默处理错误，不抛出异常
+                                console.warn('ImageProcessor脚本加载失败，可能已在manifest中加载:', error);
+                                // 检查是否已经通过manifest加载
+                                if (typeof ImageProcessor !== 'undefined') {
+                                    resolve();
+                                } else {
+                                    reject(new Error('ImageProcessor加载失败'));
+                                }
+                            };
+                            document.head.appendChild(script);
+                            setTimeout(() => {
+                                if (typeof ImageProcessor !== 'undefined') {
+                                    resolve();
+                                } else {
+                                    reject(new Error('ImageProcessor加载超时'));
+                                }
+                            }, 5000);
+                        });
+                    } catch (loadError) {
+                        // 如果动态加载失败，检查是否已经通过manifest加载
+                        if (typeof ImageProcessor !== 'undefined') {
+                            // 已经加载，继续
+                        } else {
+                            throw new Error('ImageProcessor无法加载: ' + loadError.message);
+                        }
+                    }
+                }
             }
             
             if (removeWatermark || enableProcessing) {

@@ -469,6 +469,8 @@ let downloadStats = {
     success: 0,
     failed: 0
 };
+let allRestaurants = []; // 保存所有餐馆的原始数据，用于状态同步
+let completedRestaurantsList = []; // 保存所有已完成的餐馆状态
 
 // 初始化AI服务
 async function initAIService() {
@@ -667,6 +669,12 @@ async function handleStartDownload(data) {
         }
     }
     
+    // 保存原始餐馆数据
+    allRestaurants = restaurants.map(r => ({ ...r }));
+    
+    // 初始化已完成餐馆列表
+    completedRestaurantsList = [];
+    
     // 初始化下载队列
     downloadQueue = restaurants.map(restaurant => ({
         ...restaurant,
@@ -701,6 +709,10 @@ async function processDownloadQueue(config) {
         try {
             // 更新状态
             restaurant.status = 'processing';
+            restaurant.totalImages = config.maxImages || 6;
+            restaurant.downloadedCount = 0;
+            restaurant.failedCount = 0;
+            restaurant.currentImageIndex = null;
             sendProgressUpdate();
             
             // 发送日志
@@ -734,6 +746,16 @@ async function processDownloadQueue(config) {
             downloadStats.completed++;
             downloadStats.success++;
             
+            // 保存已完成的餐馆状态
+            completedRestaurantsList.push({
+                name: restaurant.name,
+                location: restaurant.location,
+                status: restaurant.status,
+                downloadedCount: restaurant.downloadedCount || 0,
+                failedCount: restaurant.failedCount || 0,
+                totalImages: restaurant.totalImages || 0
+            });
+            
             sendLog(`餐馆 "${restaurant.name}" 处理完成`, 'success');
             
         } catch (error) {
@@ -742,6 +764,17 @@ async function processDownloadQueue(config) {
             restaurant.error = error.message;
             downloadStats.completed++;
             downloadStats.failed++;
+            
+            // 保存失败的餐馆状态
+            completedRestaurantsList.push({
+                name: restaurant.name,
+                location: restaurant.location,
+                status: restaurant.status,
+                downloadedCount: restaurant.downloadedCount || 0,
+                failedCount: restaurant.failedCount || 0,
+                totalImages: restaurant.totalImages || 0,
+                error: restaurant.error
+            });
             
             sendLog(`餐馆 "${restaurant.name}" 处理失败: ${error.message}`, 'error');
         }
@@ -753,6 +786,8 @@ async function processDownloadQueue(config) {
     // 所有任务完成
     if (downloadQueue.length === 0) {
         isProcessing = false;
+        // 清除storage中的进度数据
+        chrome.storage.local.remove(['downloadProgress', 'isDownloading']).catch(() => {});
         sendDownloadComplete();
     }
 }
@@ -860,8 +895,17 @@ async function downloadImages(imageUrls, restaurant, config) {
     let downloadedCount = 0;
     let failedCount = 0;
     
+    // 初始化图片进度
+    restaurant.totalImages = maxImages;
+    restaurant.downloadedCount = 0;
+    restaurant.failedCount = 0;
+    
     for (let i = 0; i < maxImages; i++) {
         const imageUrl = imageUrls[i];
+        
+        // 更新当前图片索引
+        restaurant.currentImageIndex = i + 1;
+        sendProgressUpdate();
         
         try {
             let finalUrl = imageUrl;
@@ -924,7 +968,11 @@ async function downloadImages(imageUrls, restaurant, config) {
             
             console.log(`✅ 图片 ${i + 1} 下载已启动，下载ID:`, downloadId);
             downloadedCount++;
+            restaurant.downloadedCount = downloadedCount;
             sendLog(`已下载图片 ${i + 1}/${maxImages}`, 'success');
+            
+            // 发送进度更新
+            sendProgressUpdate();
             
             // 延迟避免请求过快
             await new Promise(resolve => setTimeout(resolve, 1000));
@@ -932,12 +980,21 @@ async function downloadImages(imageUrls, restaurant, config) {
         } catch (error) {
             console.error('下载图片失败:', error);
             failedCount++;
-            sendLog(`下载图片 ${i + 1} 失败: ${error.message}`, 'error');
+            restaurant.failedCount = failedCount;
+            
+            // 只记录错误到控制台，不发送到popup（避免popup关闭时的连接错误）
+            console.log(`下载图片 ${i + 1} 失败: ${error.message}`);
+            
+            // 发送进度更新（这个函数已经处理了popup关闭的情况）
+            sendProgressUpdate();
         }
     }
     
+    // 下载完成，清除当前图片索引
+    restaurant.currentImageIndex = null;
     restaurant.downloadedCount = downloadedCount;
     restaurant.failedCount = failedCount;
+    sendProgressUpdate();
 }
 
 /**
@@ -1103,17 +1160,44 @@ function waitForTabLoad(tabId) {
  * 发送进度更新
  */
 function sendProgressUpdate() {
+    // 构建当前任务数据，包含图片进度信息
+    const currentTaskData = currentTask ? {
+        name: currentTask.name,
+        location: currentTask.location,
+        status: currentTask.status,
+        downloadedCount: currentTask.downloadedCount || 0,
+        failedCount: currentTask.failedCount || 0,
+        totalImages: currentTask.totalImages || 0,
+        currentImageIndex: currentTask.currentImageIndex || null
+    } : null;
+    
+    const progressData = {
+        total: downloadStats.total,
+        completed: downloadStats.completed,
+        success: downloadStats.success,
+        failed: downloadStats.failed,
+        current: currentTaskData
+    };
+    
+    // 尝试发送消息到popup
     chrome.runtime.sendMessage({
         action: 'downloadProgress',
-        data: {
-            total: downloadStats.total,
-            completed: downloadStats.completed,
-            success: downloadStats.success,
-            failed: downloadStats.failed,
-            current: currentTask
-        }
-    }).catch(() => {
+        data: progressData
+    }).catch((error) => {
         // 忽略错误（popup可能未打开）
+        // 这是正常情况，不需要记录错误
+        if (error.message && !error.message.includes('Receiving end does not exist')) {
+            // 只有非预期的错误才记录
+            console.warn('发送进度更新失败:', error.message);
+        }
+    });
+    
+    // 同时保存到storage，以便popup打开时可以读取
+    chrome.storage.local.set({ 
+        downloadProgress: progressData,
+        isDownloading: isProcessing
+    }).catch(err => {
+        console.error('保存进度数据失败:', err);
     });
 }
 
@@ -1121,14 +1205,20 @@ function sendProgressUpdate() {
  * 发送日志
  */
 function sendLog(message, level = 'info') {
+    // 尝试发送消息到popup，如果popup未打开则忽略错误
     chrome.runtime.sendMessage({
         action: 'downloadLog',
         data: {
             message,
             level
         }
-    }).catch(() => {
+    }).catch((error) => {
         // 忽略错误（popup可能未打开）
+        // 这是正常情况，不需要记录错误
+        if (error.message && !error.message.includes('Receiving end does not exist')) {
+            // 只有非预期的错误才记录
+            console.warn('发送日志消息失败:', error.message);
+        }
     });
 }
 
@@ -1136,11 +1226,29 @@ function sendLog(message, level = 'info') {
  * 发送下载完成通知
  */
 function sendDownloadComplete() {
+    // 构建包含所有餐馆状态的完成数据
+    const completeData = {
+        ...downloadStats,
+        restaurants: completedRestaurantsList // 包含所有餐馆的最终状态
+    };
+    
     chrome.runtime.sendMessage({
         action: 'downloadComplete',
-        data: downloadStats
-    }).catch(() => {
+        data: completeData
+    }).catch((error) => {
         // 忽略错误（popup可能未打开）
+        // 这是正常情况，不需要记录错误
+        if (error.message && !error.message.includes('Receiving end does not exist')) {
+            // 只有非预期的错误才记录
+            console.warn('发送完成通知失败:', error.message);
+        }
+    });
+    
+    // 同时保存到storage
+    chrome.storage.local.set({
+        downloadComplete: completeData
+    }).catch(err => {
+        console.error('保存完成数据失败:', err);
     });
 }
 

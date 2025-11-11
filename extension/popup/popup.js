@@ -15,6 +15,7 @@ let config = {
 };
 let isDownloading = false;
 let currentTask = null;
+let currentProgress = null; // 存储当前进度数据
 
 // DOM元素
 const elements = {
@@ -74,6 +75,9 @@ async function init() {
     // 加载餐馆列表
     await loadRestaurants();
     
+    // 检查是否有正在进行的下载任务
+    await checkDownloadStatus();
+    
     // 绑定事件
     bindEvents();
     
@@ -84,6 +88,55 @@ async function init() {
     updateUI();
     
     console.log('Popup界面初始化完成');
+}
+
+/**
+ * 检查下载状态
+ */
+async function checkDownloadStatus() {
+    try {
+        const result = await chrome.storage.local.get(['downloadProgress', 'isDownloading', 'downloadComplete']);
+        
+        // 检查是否有已完成的下载任务（但状态未同步）
+        if (result.downloadComplete && result.downloadComplete.restaurants) {
+            // 同步餐馆状态
+            result.downloadComplete.restaurants.forEach(completedRestaurant => {
+                const index = restaurants.findIndex(r => 
+                    r.name === completedRestaurant.name && 
+                    r.location === completedRestaurant.location
+                );
+                
+                if (index !== -1) {
+                    restaurants[index].status = completedRestaurant.status;
+                    restaurants[index].downloadedCount = completedRestaurant.downloadedCount || 0;
+                    restaurants[index].failedCount = completedRestaurant.failedCount || 0;
+                    restaurants[index].totalImages = completedRestaurant.totalImages || 0;
+                }
+            });
+            
+            // 确保下载状态为false，按钮可用
+            isDownloading = false;
+            elements.startDownloadBtn.disabled = false;
+            updateStartButton();
+            
+            // 清除完成数据
+            chrome.storage.local.remove(['downloadComplete']).catch(() => {});
+            saveRestaurants();
+            renderRestaurantList();
+        }
+        
+        // 检查是否有正在进行的下载任务
+        if (result.isDownloading && result.downloadProgress) {
+            // 有正在进行的下载任务，显示进度
+            isDownloading = true;
+            elements.progressSection.style.display = 'block';
+            elements.logSection.style.display = 'block';
+            elements.startDownloadBtn.disabled = true;
+            updateProgress(result.downloadProgress);
+        }
+    } catch (error) {
+        console.error('检查下载状态失败:', error);
+    }
 }
 
 /**
@@ -296,13 +349,38 @@ function setupMessageListeners() {
         chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (message.action === 'downloadProgress') {
                 updateProgress(message.data);
+                // 同时保存到storage
+                chrome.storage.local.set({ 
+                    downloadProgress: message.data,
+                    isDownloading: true
+                }).catch(err => console.error('保存进度失败:', err));
             } else if (message.action === 'downloadLog') {
                 addLog(message.data.message, message.data.level);
             } else if (message.action === 'downloadComplete') {
                 handleDownloadComplete(message.data);
+                // 清除storage中的进度数据
+                chrome.storage.local.remove(['downloadProgress', 'isDownloading']).catch(() => {});
             }
             return true; // 保持消息通道开放
         });
+    }
+    
+    // 定期检查进度更新（作为备用方案）
+    if (isDownloading) {
+        const progressCheckInterval = setInterval(async () => {
+            if (!isDownloading) {
+                clearInterval(progressCheckInterval);
+                return;
+            }
+            try {
+                const result = await chrome.storage.local.get(['downloadProgress']);
+                if (result.downloadProgress) {
+                    updateProgress(result.downloadProgress);
+                }
+            } catch (error) {
+                console.error('检查进度失败:', error);
+            }
+        }, 1000); // 每秒检查一次
     }
 }
 
@@ -318,6 +396,112 @@ function updateUI() {
 let restaurantListHandler = null;
 
 /**
+ * 获取餐馆状态文本
+ */
+function getStatusText(restaurant, progressData) {
+    // 如果有进度数据且是当前正在处理的餐馆，使用进度数据
+    if (progressData && progressData.current) {
+        const isCurrent = progressData.current.name === restaurant.name && 
+                          progressData.current.location === restaurant.location;
+        
+        if (isCurrent) {
+            // 当前正在处理的餐馆
+            const status = progressData.current.status || 'processing';
+            const total = progressData.current.totalImages || 0;
+            const downloaded = progressData.current.downloadedCount || 0;
+            const failed = progressData.current.failedCount || 0;
+            
+            if (status === 'processing') {
+                return `下载中 (${downloaded}/${total})`;
+            } else if (status === 'completed') {
+                if (failed > 0) {
+                    return `已完成 (${downloaded}/${total}, 失败${failed})`;
+                }
+                return `已完成 (${downloaded}/${total})`;
+            } else if (status === 'failed') {
+                return '失败';
+            }
+        }
+    }
+    
+    // 从restaurant对象中获取状态（用于已完成或失败的餐馆）
+    const status = restaurant.status || 'pending';
+    if (status === 'completed') {
+        const total = restaurant.totalImages || 0;
+        const downloaded = restaurant.downloadedCount || 0;
+        const failed = restaurant.failedCount || 0;
+        if (failed > 0) {
+            return `已完成 (${downloaded}/${total}, 失败${failed})`;
+        }
+        return total > 0 ? `已完成 (${downloaded}/${total})` : '已完成';
+    } else if (status === 'failed') {
+        return '失败';
+    } else if (status === 'processing') {
+        const total = restaurant.totalImages || 0;
+        const downloaded = restaurant.downloadedCount || 0;
+        return total > 0 ? `下载中 (${downloaded}/${total})` : '下载中';
+    }
+    
+    // 默认状态：等待中（只在下载过程中显示）
+    if (isDownloading) {
+        return '等待中';
+    }
+    return '';
+}
+
+/**
+ * 更新餐馆列表状态显示
+ */
+function updateRestaurantListStatus(progressData) {
+    if (!progressData || !progressData.current) {
+        return;
+    }
+    
+    // 更新餐馆列表中的状态显示
+    const restaurantItems = elements.restaurantList.querySelectorAll('.restaurant-item');
+    restaurantItems.forEach((item, index) => {
+        if (index < restaurants.length) {
+            const restaurant = restaurants[index];
+            const statusText = getStatusText(restaurant, progressData);
+            const isCurrent = progressData.current.name === restaurant.name && 
+                            progressData.current.location === restaurant.location;
+            
+            // 检查是否已有状态元素
+            let statusEl = item.querySelector('.restaurant-status');
+            if (!statusEl) {
+                // 创建状态元素
+                statusEl = document.createElement('span');
+                statusEl.className = 'restaurant-status';
+                // 插入到餐馆信息中
+                const restaurantInfo = item.querySelector('.restaurant-info');
+                if (restaurantInfo) {
+                    restaurantInfo.appendChild(statusEl);
+                }
+            }
+            
+            // 更新状态文本和样式
+            if (statusText) {
+                statusEl.textContent = statusText;
+                statusEl.className = 'restaurant-status';
+                
+                // 根据状态添加样式类
+                if (isCurrent && progressData.current.status === 'processing') {
+                    statusEl.classList.add('status-processing');
+                } else if (restaurant.status === 'completed') {
+                    statusEl.classList.add('status-completed');
+                } else if (restaurant.status === 'failed') {
+                    statusEl.classList.add('status-failed');
+                } else {
+                    statusEl.classList.add('status-pending');
+                }
+            } else {
+                statusEl.style.display = 'none';
+            }
+        }
+    });
+}
+
+/**
  * 渲染餐馆列表
  */
 function renderRestaurantList() {
@@ -326,11 +510,18 @@ function renderRestaurantList() {
         return;
     }
     
-    const html = restaurants.map((restaurant, index) => `
+    const html = restaurants.map((restaurant, index) => {
+        const statusText = getStatusText(restaurant, currentProgress);
+        const statusClass = restaurant.status === 'processing' ? 'status-processing' :
+                           restaurant.status === 'completed' ? 'status-completed' :
+                           restaurant.status === 'failed' ? 'status-failed' : 'status-pending';
+        
+        return `
         <div class="restaurant-item" data-index="${index}">
             <div class="restaurant-info">
                 <span class="restaurant-name">${escapeHtml(restaurant.name)}</span>
                 <span class="restaurant-location">${restaurant.location || '未设置地点'}</span>
+                ${statusText ? `<span class="restaurant-status ${statusClass}">${statusText}</span>` : ''}
             </div>
             <div class="restaurant-actions">
                 <button class="btn-icon btn-edit" data-action="edit" data-index="${index}" title="编辑">
@@ -341,7 +532,8 @@ function renderRestaurantList() {
                 </button>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
     
     elements.restaurantList.innerHTML = html;
     
@@ -619,6 +811,37 @@ function handleDownloadComplete(data) {
     elements.startDownloadBtn.disabled = false;
     updateStartButton();
     
+    // 如果有餐馆状态数据，同步更新本地餐馆列表
+    if (data.restaurants && Array.isArray(data.restaurants)) {
+        data.restaurants.forEach(completedRestaurant => {
+            // 找到对应的餐馆并更新状态
+            const index = restaurants.findIndex(r => 
+                r.name === completedRestaurant.name && 
+                r.location === completedRestaurant.location
+            );
+            
+            if (index !== -1) {
+                // 更新餐馆状态
+                restaurants[index].status = completedRestaurant.status;
+                restaurants[index].downloadedCount = completedRestaurant.downloadedCount || 0;
+                restaurants[index].failedCount = completedRestaurant.failedCount || 0;
+                restaurants[index].totalImages = completedRestaurant.totalImages || 0;
+            }
+        });
+        
+        // 保存更新后的餐馆列表
+        saveRestaurants();
+    }
+    
+    // 清除当前进度数据
+    currentProgress = null;
+    
+    // 清除storage中的进度数据
+    chrome.storage.local.remove(['downloadProgress', 'isDownloading']).catch(() => {});
+    
+    // 更新餐馆列表显示（显示最终状态）
+    renderRestaurantList();
+    
     addLog(`下载完成！共处理 ${data.total} 个餐馆，成功 ${data.success} 个，失败 ${data.failed} 个`, 'success');
 }
 
@@ -626,19 +849,67 @@ function handleDownloadComplete(data) {
  * 更新进度
  */
 function updateProgress(data) {
+    // 保存进度数据
+    currentProgress = data;
+    
     const percent = Math.round((data.completed / data.total) * 100);
     elements.progressFill.style.width = percent + '%';
     elements.progressText.textContent = percent + '%';
     
     if (data.current) {
-        elements.currentTask.textContent = `正在处理: ${data.current.name} (${data.current.location || '未设置地点'})`;
+        // 显示当前餐馆信息和图片进度
+        const imageProgress = data.current.totalImages > 0 
+            ? ` - 已下载 ${data.current.downloadedCount || 0}/${data.current.totalImages} 张图片`
+            : '';
+        const currentImage = data.current.currentImageIndex 
+            ? ` (正在下载第 ${data.current.currentImageIndex} 张)`
+            : '';
+        
+        elements.currentTask.textContent = `正在处理: ${data.current.name} (${data.current.location || '未设置地点'})${imageProgress}${currentImage}`;
+        
+        // 更新图片进度显示
+        const currentImageProgressEl = document.getElementById('currentImageProgress');
+        if (currentImageProgressEl) {
+            if (data.current.currentImageIndex) {
+                currentImageProgressEl.textContent = `正在下载第 ${data.current.currentImageIndex}/${data.current.totalImages} 张图片`;
+                currentImageProgressEl.style.display = 'block';
+            } else if (data.current.totalImages > 0) {
+                currentImageProgressEl.textContent = `已下载 ${data.current.downloadedCount || 0}/${data.current.totalImages} 张图片`;
+                currentImageProgressEl.style.display = 'block';
+            } else {
+                currentImageProgressEl.style.display = 'none';
+            }
+        }
+        
+        // 更新图片进度条
+        const imageProgressBar = document.getElementById('imageProgressBar');
+        const imageProgressFill = document.getElementById('imageProgressFill');
+        if (imageProgressBar && imageProgressFill && data.current.totalImages > 0) {
+            const imagePercent = Math.round(((data.current.downloadedCount || 0) / data.current.totalImages) * 100);
+            imageProgressFill.style.width = imagePercent + '%';
+            imageProgressBar.style.display = 'block';
+        }
+    } else {
+        // 隐藏图片进度显示
+        const currentImageProgressEl = document.getElementById('currentImageProgress');
+        if (currentImageProgressEl) {
+            currentImageProgressEl.style.display = 'none';
+        }
+        const imageProgressBar = document.getElementById('imageProgressBar');
+        if (imageProgressBar) {
+            imageProgressBar.style.display = 'none';
+        }
     }
     
     elements.progressDetails.innerHTML = `
         <div>已完成: ${data.completed} / ${data.total}</div>
         <div>成功: ${data.success}</div>
         <div>失败: ${data.failed}</div>
+        ${data.current && data.current.currentImageIndex ? `<div>当前图片: ${data.current.currentImageIndex}/${data.current.totalImages}</div>` : ''}
     `;
+    
+    // 更新餐馆列表状态
+    updateRestaurantListStatus(data);
 }
 
 /**
