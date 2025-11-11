@@ -248,6 +248,9 @@ function updateUI() {
     updateStartButton();
 }
 
+// 事件委托处理器（只绑定一次）
+let restaurantListHandler = null;
+
 /**
  * 渲染餐馆列表
  */
@@ -258,16 +261,16 @@ function renderRestaurantList() {
     }
     
     const html = restaurants.map((restaurant, index) => `
-        <div class="restaurant-item">
+        <div class="restaurant-item" data-index="${index}">
             <div class="restaurant-info">
                 <span class="restaurant-name">${escapeHtml(restaurant.name)}</span>
                 <span class="restaurant-location">${restaurant.location || '未设置地点'}</span>
             </div>
             <div class="restaurant-actions">
-                <button class="btn-icon" onclick="editRestaurant(${index})" title="编辑">
+                <button class="btn-icon btn-edit" data-action="edit" data-index="${index}" title="编辑">
                     <i class="icon-edit"></i>
                 </button>
-                <button class="btn-icon" onclick="deleteRestaurant(${index})" title="删除">
+                <button class="btn-icon btn-delete" data-action="delete" data-index="${index}" title="删除">
                     <i class="icon-delete"></i>
                 </button>
             </div>
@@ -275,6 +278,37 @@ function renderRestaurantList() {
     `).join('');
     
     elements.restaurantList.innerHTML = html;
+    
+    // 只绑定一次事件监听器（使用事件委托，避免CSP问题）
+    if (!restaurantListHandler) {
+        restaurantListHandler = (e) => {
+            const button = e.target.closest('.btn-icon');
+            if (!button) return;
+            
+            const action = button.getAttribute('data-action');
+            const indexStr = button.getAttribute('data-index');
+            
+            if (!indexStr) {
+                console.error('缺少data-index属性');
+                return;
+            }
+            
+            const index = parseInt(indexStr);
+            
+            if (isNaN(index) || index < 0 || index >= restaurants.length) {
+                console.error('无效的索引:', index, '总数:', restaurants.length);
+                return;
+            }
+            
+            if (action === 'edit') {
+                editRestaurant(index);
+            } else if (action === 'delete') {
+                deleteRestaurant(index);
+            }
+        };
+        
+        elements.restaurantList.addEventListener('click', restaurantListHandler);
+    }
 }
 
 /**
@@ -355,15 +389,41 @@ function editRestaurant(index) {
 }
 
 /**
- * 删除餐馆
+ * 删除餐馆（直接删除，无需确认）
  */
-function deleteRestaurant(index) {
-    if (confirm(`确定要删除餐馆 "${restaurants[index].name}" 吗？`)) {
-        const name = restaurants[index].name;
+async function deleteRestaurant(index) {
+    // 验证索引
+    if (index < 0 || index >= restaurants.length) {
+        console.error('删除失败: 无效的索引', index);
+        addLog('删除失败: 无效的索引', 'error');
+        return;
+    }
+    
+    const restaurant = restaurants[index];
+    if (!restaurant) {
+        console.error('删除失败: 餐馆不存在', index);
+        addLog('删除失败: 餐馆不存在', 'error');
+        return;
+    }
+    
+    try {
+        const name = restaurant.name;
         restaurants.splice(index, 1);
-        saveRestaurants();
+        
+        // 保存到存储
+        await saveRestaurants();
+        
+        // 更新UI
         updateUI();
-        addLog(`已删除餐馆: ${name}`, 'info');
+        
+        // 记录日志
+        addLog(`已删除餐馆: ${name}`, 'success');
+        console.log('✅ 已删除餐馆:', name);
+    } catch (error) {
+        console.error('删除餐馆失败:', error);
+        addLog(`删除餐馆失败: ${error.message}`, 'error');
+        // 恢复数组（如果保存失败）
+        restaurants.splice(index, 0, restaurant);
     }
 }
 
@@ -465,16 +525,40 @@ async function handleStartDownload() {
     // 保存当前配置
     await saveConfig();
     
+    // 读取AI配置
+    const aiConfigResult = await chrome.storage.sync.get(['aiConfig']);
+    const aiConfig = aiConfigResult.aiConfig || {};
+    
+    // 构建完整的配置对象
+    const fullConfig = {
+        ...config,
+        enableAI: aiConfig.enabled && !!aiConfig.apiKey, // 只有启用且有API密钥时才启用AI
+        aiConfig: aiConfig // 传递完整的AI配置
+    };
+    
+    console.log('📤 发送下载请求，配置:', {
+        maxImages: fullConfig.maxImages,
+        removeWatermark: fullConfig.removeWatermark,
+        enableProcessing: fullConfig.enableProcessing,
+        enableAI: fullConfig.enableAI,
+        hasApiKey: !!aiConfig.apiKey
+    });
+    
     // 发送下载请求到background script
     chrome.runtime.sendMessage({
         action: 'startDownload',
         data: {
             restaurants,
-            config
+            config: fullConfig
         }
     });
     
     addLog('开始批量下载...', 'info');
+    if (fullConfig.enableAI) {
+        addLog('AI分析功能已启用', 'info');
+    } else {
+        addLog('AI分析功能未启用（请在高级设置中配置API密钥）', 'warning');
+    }
 }
 
 /**
@@ -613,9 +697,12 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// 全局函数（供HTML调用）
-window.editRestaurant = editRestaurant;
-window.deleteRestaurant = deleteRestaurant;
+// 注意：不再需要将函数暴露到window，因为使用了事件委托
+// 保留这些函数以便调试
+if (typeof window !== 'undefined') {
+    window.editRestaurant = editRestaurant;
+    window.deleteRestaurant = deleteRestaurant;
+}
 
 // 初始化
 init();

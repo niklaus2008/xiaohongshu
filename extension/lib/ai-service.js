@@ -1,56 +1,112 @@
 /**
- * AI服务模块 - Chrome插件版
- * 集成GLM API，提供智能图片分析和内容生成功能
+ * AI服务 - 在Chrome插件中调用GLM API
+ * 支持图片分析和评语生成
  * 
  * @author AI Assistant
  * @version 1.0.0
  */
 
 class AIService {
+    /**
+     * 构造函数
+     * @param {Object} config - AI配置
+     * @param {string} config.apiKey - GLM API密钥
+     * @param {string} config.model - 模型名称（默认：glm-4v-plus）
+     * @param {string} config.baseUrl - API基础URL
+     */
     constructor(config = {}) {
-        this.config = {
-            enabled: config.enabled || false,
-            apiKey: config.apiKey || '',
-            apiBaseUrl: config.apiBaseUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
-            model: config.model || 'glm-4-flash',
-            timeout: config.timeout || 30000,
-            maxRetries: config.maxRetries || 3,
-            ...config
-        };
-        
-        this.isEnabled = this.config.enabled && this.config.apiKey;
+        this.apiKey = config.apiKey || '';
+        this.model = config.model || 'glm-4v-plus';
+        this.baseUrl = config.baseUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+        this.enabled = config.enabled !== false && !!this.apiKey;
     }
 
     /**
      * 检查AI服务是否可用
+     * @returns {boolean}
      */
     isAvailable() {
-        return this.isEnabled;
+        return this.enabled && !!this.apiKey;
     }
 
     /**
-     * 调用GLM API
+     * 将图片URL转换为base64
+     * @param {string} imageUrl - 图片URL
+     * @returns {Promise<string>} base64字符串
      */
-    async callAPI(messages, options = {}) {
+    async imageToBase64(imageUrl) {
+        try {
+            const response = await fetch(imageUrl);
+            const blob = await response.blob();
+            
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const base64 = reader.result.split(',')[1]; // 移除data:image/...;base64,前缀
+                    resolve(base64);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        } catch (error) {
+            console.error('图片转base64失败:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * 分析图片
+     * @param {string|Array<string>} imageUrls - 图片URL或URL数组
+     * @param {string} prompt - 分析提示词
+     * @returns {Promise<Object>} 分析结果
+     */
+    async analyzeImages(imageUrls, prompt = '请详细分析这张餐馆图片，包括：1.菜品特色 2.环境氛围 3.装修风格 4.推荐亮点 5.适合场景') {
         if (!this.isAvailable()) {
             throw new Error('AI服务未启用或API密钥未配置');
         }
 
-        const requestBody = {
-            model: this.config.model,
-            messages: messages,
-            temperature: options.temperature || 0.3,
-            max_tokens: options.maxTokens || 1000
-        };
+        const urls = Array.isArray(imageUrls) ? imageUrls : [imageUrls];
+        const imageContents = [];
+
+        // 转换所有图片为base64
+        for (const url of urls) {
+            try {
+                const base64 = await this.imageToBase64(url);
+                imageContents.push({
+                    type: 'image_url',
+                    image_url: {
+                        url: `data:image/jpeg;base64,${base64}`
+                    }
+                });
+            } catch (error) {
+                console.error('处理图片失败:', url, error);
+            }
+        }
+
+        if (imageContents.length === 0) {
+            throw new Error('没有可用的图片');
+        }
+
+        // 构建请求
+        const messages = [{
+            role: 'user',
+            content: [
+                { type: 'text', text: prompt },
+                ...imageContents
+            ]
+        }];
 
         try {
-            const response = await fetch(this.config.apiBaseUrl, {
+            const response = await fetch(this.baseUrl, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.config.apiKey}`
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(requestBody)
+                body: JSON.stringify({
+                    model: this.model,
+                    messages: messages
+                })
             });
 
             if (!response.ok) {
@@ -59,274 +115,125 @@ class AIService {
             }
 
             const data = await response.json();
-            
-            if (data.choices && data.choices.length > 0) {
-                return {
-                    success: true,
-                    content: data.choices[0].message.content,
-                    usage: data.usage
-                };
-            } else {
-                throw new Error('API返回数据格式错误');
-            }
+            return {
+                success: true,
+                content: data.choices[0]?.message?.content || '',
+                usage: data.usage || {}
+            };
         } catch (error) {
-            console.error('AI API调用失败:', error);
+            console.error('AI分析失败:', error);
             throw error;
         }
     }
 
     /**
-     * 分析图片（通过URL）
-     * 注意：Chrome插件中需要先下载图片并转换为base64
-     */
-    async analyzeImage(imageUrl, prompt = '请详细分析这张餐馆图片，包括：1.菜品特色 2.环境氛围 3.装修风格 4.推荐亮点 5.适合场景') {
-        try {
-            // 下载图片并转换为base64
-            const base64Image = await this.urlToBase64(imageUrl);
-            
-            // 获取图片MIME类型
-            const mimeType = this.getMimeTypeFromUrl(imageUrl);
-
-            const messages = [
-                {
-                    role: 'user',
-                    content: [
-                        {
-                            type: 'text',
-                            text: prompt
-                        },
-                        {
-                            type: 'image_url',
-                            image_url: {
-                                url: `data:${mimeType};base64,${base64Image}`
-                            }
-                        }
-                    ]
-                }
-            ];
-
-            const result = await this.callAPI(messages, {
-                temperature: 0.3,
-                maxTokens: 1000
-            });
-
-            return {
-                success: true,
-                analysis: result.content,
-                imageUrl: imageUrl,
-                timestamp: new Date().toISOString()
-            };
-        } catch (error) {
-            console.error('图片分析失败:', error);
-            return {
-                success: false,
-                error: error.message,
-                imageUrl: imageUrl,
-                timestamp: new Date().toISOString()
-            };
-        }
-    }
-
-    /**
-     * 批量分析图片
-     */
-    async analyzeImages(imageUrls, prompt) {
-        const results = [];
-        
-        for (const url of imageUrls) {
-            try {
-                const result = await this.analyzeImage(url, prompt);
-                results.push(result);
-                // 延迟避免请求过快
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            } catch (error) {
-                console.error('分析图片失败:', url, error);
-                results.push({
-                    success: false,
-                    error: error.message,
-                    imageUrl: url
-                });
-            }
-        }
-        
-        return results;
-    }
-
-    /**
-     * 生成餐馆描述
-     */
-    async generateRestaurantDescription(analysisResults, restaurantName, location = '', specialties = []) {
-        const analysisText = analysisResults
-            .filter(r => r.success)
-            .map((r, i) => `图片${i + 1}分析：${r.analysis}`)
-            .join('\n\n');
-
-        const specialtiesText = specialties.length > 0 
-            ? `\n\n特色菜信息：${specialties.join('、')}`
-            : '';
-
-        const prompt = `请基于以下图片分析结果，为餐馆"${restaurantName}"${location ? `（位于${location}）` : ''}生成一段详细的描述，包括：
-1. 餐馆的整体特色和亮点
-2. 菜品推荐和特色
-3. 环境氛围和装修风格
-4. 适合的用餐场景
-5. 推荐理由
-
-图片分析结果：
-${analysisText}${specialtiesText}
-
-要求：描述要真实自然，避免夸张的网络热词，突出具体特色。`;
-
-        try {
-            const result = await this.callAPI([{
-                role: 'user',
-                content: prompt
-            }], {
-                temperature: 0.7,
-                maxTokens: 500
-            });
-
-            return {
-                success: true,
-                description: result.content
-            };
-        } catch (error) {
-            console.error('生成描述失败:', error);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
-    }
-
-    /**
      * 生成评语
+     * @param {Array<Object>} analysisResults - 图片分析结果数组
+     * @param {string} restaurantName - 餐馆名称
+     * @param {string} location - 地点
+     * @returns {Promise<Object>} 评语结果
      */
-    async generateReview(analysisResults, restaurantName, location = '', specialties = []) {
-        const analysisText = analysisResults
-            .filter(r => r.success)
-            .map((r, i) => `图片${i + 1}分析：${r.analysis}`)
-            .join('\n\n');
+    async generateReview(analysisResults, restaurantName, location = '') {
+        if (!this.isAvailable()) {
+            throw new Error('AI服务未启用或API密钥未配置');
+        }
 
-        const specialtiesText = specialties.length > 0 
-            ? `\n\n特色菜信息：${specialties.join('、')}`
-            : '';
+        // 处理分析结果，确保格式正确
+        const analysisText = analysisResults.map((result, index) => {
+            if (typeof result === 'string') {
+                return `图片${index + 1}分析：\n${result}`;
+            } else if (result && result.content) {
+                return `图片${index + 1}分析：\n${result.content}`;
+            } else if (result && result.success && result.content) {
+                return `图片${index + 1}分析：\n${result.content}`;
+            } else {
+                return `图片${index + 1}分析：\n${JSON.stringify(result)}`;
+            }
+        }).join('\n\n');
 
-        const prompt = `请基于以下图片分析结果，为餐馆"${restaurantName}"${location ? `（位于${location}）` : ''}生成一段符合大众点评风格的五星好评笔记。
+        const prompt = `请基于以下图片分析结果，为餐馆"${restaurantName}"${location ? `（${location}）` : ''}生成一篇真实、自然的大众点评风格五星好评笔记。
 
 要求：
-1. 直接输出评语内容，不要包含"标题:"、"正文:"、"结尾标签:"等格式标识词
-2. 语气自然真实，避免夸张的网络热词
-3. 描述具体，内容有侧重
-4. 结尾包含大众点评活动标签：#创作者赏金计划 #0元玩转这座城 #城市向导官# 优质创作者赏金计划
-5. 避免重复使用固定语句，增加词汇多样性
+1. 语气自然真实，避免夸张网络热词
+2. 描述具体，内容有侧重
+3. 包含标题、正文和结尾标签
+4. 直接输出评语内容，不要包含"标题:"、"正文:"、"结尾标签:"等格式标识词
+5. 结尾标签必须包含：#创作者赏金计划 #0元玩转这座城 #城市向导官# 优质创作者赏金计划
 
 图片分析结果：
-${analysisText}${specialtiesText}
-
-请生成评语：`;
+${analysisText}`;
 
         try {
-            const result = await this.callAPI([{
-                role: 'user',
-                content: prompt
-            }], {
-                temperature: 0.8,
-                maxTokens: 800
+            console.log('📝 正在生成评语，餐馆:', restaurantName);
+            
+            const response = await fetch(this.baseUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: 'glm-4-flash', // 评语生成使用文本模型
+                    messages: [{
+                        role: 'user',
+                        content: prompt
+                    }]
+                })
             });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                let errorData;
+                try {
+                    errorData = JSON.parse(errorText);
+                } catch (e) {
+                    errorData = { message: errorText };
+                }
+                throw new Error(errorData.error?.message || errorData.message || `API请求失败: ${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            const review = data.choices[0]?.message?.content || '';
+
+            if (!review) {
+                throw new Error('AI返回的评语为空');
+            }
+
+            console.log('✅ 评语生成成功，长度:', review.length);
 
             return {
                 success: true,
-                review: result.content
+                review: review,
+                usage: data.usage || {}
             };
         } catch (error) {
             console.error('生成评语失败:', error);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
-    }
-
-    /**
-     * 将图片URL转换为base64
-     */
-    async urlToBase64(url) {
-        try {
-            const response = await fetch(url);
-            const blob = await response.blob();
-            
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    const base64 = reader.result.split(',')[1];
-                    resolve(base64);
-                };
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        } catch (error) {
-            throw new Error(`图片转换失败: ${error.message}`);
-        }
-    }
-
-    /**
-     * 从URL获取MIME类型
-     */
-    getMimeTypeFromUrl(url) {
-        const ext = url.match(/\.(jpg|jpeg|png|gif|webp)$/i)?.[1]?.toLowerCase();
-        const mimeTypes = {
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'png': 'image/png',
-            'gif': 'image/gif',
-            'webp': 'image/webp'
-        };
-        return mimeTypes[ext] || 'image/jpeg';
-    }
-
-    /**
-     * 测试API连接
-     */
-    async testConnection() {
-        try {
-            const result = await this.callAPI([{
-                role: 'user',
-                content: '你好，请简单介绍一下你自己。'
-            }], {
-                temperature: 0.3,
-                maxTokens: 100
-            });
-
-            return {
-                success: true,
-                message: 'GLM API连接测试成功',
-                response: result.content
-            };
-        } catch (error) {
-            return {
-                success: false,
-                message: 'GLM API连接测试失败',
-                error: error.message
-            };
+            throw error;
         }
     }
 }
 
-// 在 Service Worker 环境中，直接暴露到全局作用域
-// 这样 importScripts 加载后，AIService 类就可以在 background.js 中使用
+// 导出 - 支持多种环境
+// 优先设置全局变量，确保在所有环境中都能访问
+if (typeof globalThis !== 'undefined') {
+    globalThis.AIService = AIService;
+}
+
 if (typeof self !== 'undefined') {
-    // Service Worker 环境
+    // Service Worker环境
     self.AIService = AIService;
 }
 
-// 如果在浏览器环境中，导出到全局
 if (typeof window !== 'undefined') {
+    // 浏览器环境
     window.AIService = AIService;
 }
 
-// 如果在Node.js环境中，使用module.exports
 if (typeof module !== 'undefined' && module.exports) {
+    // Node.js环境
     module.exports = AIService;
 }
 
+// 注意：AIService类已经在上面定义，通过globalThis、self、window等导出
+// 在Service Worker中，通过Function构造器执行时，AIService会自动成为局部变量
+// 执行后会通过return语句返回

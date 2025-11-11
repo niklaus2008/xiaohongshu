@@ -6,37 +6,299 @@
  * @version 1.0.0
  */
 
-// 在 Manifest V3 中，AI服务是可选的
-// 如果加载失败，插件仍然可以正常运行，只是AI功能不可用
-let aiServiceInstance = null;
-let AIService = null;
+// ============================================================================
+// AI服务代码（内联，避免importScripts加载问题）
+// ============================================================================
 
-// AI服务脚本加载（可选功能）
-// 注意：在 Manifest V3 的 Service Worker 中，importScripts 可能受到限制
-// 如果无法加载，插件仍然可以正常运行，只是AI功能不可用
-// 
-// 暂时注释掉 importScripts，避免加载错误导致插件无法启动
-// 如果需要AI功能，可以考虑将代码内联或使用其他加载方式
-/*
-try {
-    importScripts('lib/ai-service.js');
-    if (typeof self !== 'undefined' && typeof self.AIService !== 'undefined') {
-        AIService = self.AIService;
-        console.log('✅ AI服务脚本加载成功');
-    } else if (typeof AIService !== 'undefined') {
-        console.log('✅ AI服务脚本加载成功（全局作用域）');
-    } else {
-        console.warn('⚠️ AI服务脚本已加载，但 AIService 类未定义');
-        AIService = null;
+/**
+ * AI服务 - 在Chrome插件中调用GLM API
+ * 支持图片分析和评语生成
+ */
+class AIService {
+    /**
+     * 构造函数
+     * @param {Object} config - AI配置
+     * @param {string} config.apiKey - GLM API密钥
+     * @param {string} config.model - 模型名称（默认：glm-4v-plus）
+     * @param {string} config.baseUrl - API基础URL
+     */
+    constructor(config = {}) {
+        this.apiKey = config.apiKey || '';
+        this.model = config.model || 'glm-4v-plus';
+        this.baseUrl = config.baseUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+        this.enabled = config.enabled !== false && !!this.apiKey;
     }
-} catch (error) {
-    console.warn('⚠️ AI服务脚本加载失败，AI功能将不可用:', error.message || error.toString());
-    AIService = null;
+
+    /**
+     * 检查AI服务是否可用
+     * @returns {boolean}
+     */
+    isAvailable() {
+        return this.enabled && !!this.apiKey;
+    }
+
+    /**
+     * 将图片URL转换为base64
+     * @param {string} imageUrl - 图片URL
+     * @returns {Promise<string>} base64字符串
+     */
+    async imageToBase64(imageUrl) {
+        try {
+            const response = await fetch(imageUrl);
+            const blob = await response.blob();
+            
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const base64 = reader.result.split(',')[1]; // 移除data:image/...;base64,前缀
+                    resolve(base64);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        } catch (error) {
+            console.error('图片转base64失败:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * 分析图片
+     * @param {string|Array<string>} imageUrls - 图片URL或URL数组
+     * @param {string} prompt - 分析提示词
+     * @returns {Promise<Object>} 分析结果
+     */
+    async analyzeImages(imageUrls, prompt = '请详细分析这张餐馆图片，包括：1.菜品特色 2.环境氛围 3.装修风格 4.推荐亮点 5.适合场景') {
+        if (!this.isAvailable()) {
+            throw new Error('AI服务未启用或API密钥未配置');
+        }
+
+        const urls = Array.isArray(imageUrls) ? imageUrls : [imageUrls];
+        const imageContents = [];
+
+        // 转换所有图片为base64
+        for (const url of urls) {
+            try {
+                const base64 = await this.imageToBase64(url);
+                imageContents.push({
+                    type: 'image_url',
+                    image_url: {
+                        url: `data:image/jpeg;base64,${base64}`
+                    }
+                });
+            } catch (error) {
+                console.error('处理图片失败:', url, error);
+            }
+        }
+
+        if (imageContents.length === 0) {
+            throw new Error('没有可用的图片');
+        }
+
+        // 构建请求
+        const messages = [{
+            role: 'user',
+            content: [
+                { type: 'text', text: prompt },
+                ...imageContents
+            ]
+        }];
+
+        try {
+            const response = await fetch(this.baseUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: this.model,
+                    messages: messages
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error?.message || `API请求失败: ${response.status}`);
+            }
+
+            const data = await response.json();
+            return {
+                success: true,
+                content: data.choices[0]?.message?.content || '',
+                usage: data.usage || {}
+            };
+        } catch (error) {
+            console.error('AI分析失败:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * 生成评语
+     * @param {Array<Object>} analysisResults - 图片分析结果数组
+     * @param {string} restaurantName - 餐馆名称
+     * @param {string} location - 地点
+     * @returns {Promise<Object>} 评语结果
+     */
+    async generateReview(analysisResults, restaurantName, location = '') {
+        if (!this.isAvailable()) {
+            throw new Error('AI服务未启用或API密钥未配置');
+        }
+
+        // 处理分析结果，确保格式正确
+        const analysisText = analysisResults.map((result, index) => {
+            if (typeof result === 'string') {
+                return `图片${index + 1}分析：\n${result}`;
+            } else if (result && result.content) {
+                return `图片${index + 1}分析：\n${result.content}`;
+            } else if (result && result.success && result.content) {
+                return `图片${index + 1}分析：\n${result.content}`;
+            } else {
+                return `图片${index + 1}分析：\n${JSON.stringify(result)}`;
+            }
+        }).join('\n\n');
+
+        const prompt = `请基于以下图片分析结果，为餐馆"${restaurantName}"${location ? `（${location}）` : ''}生成一篇真实、自然的大众点评风格五星好评笔记。
+
+要求：
+1. 语气自然真实，避免夸张网络热词
+2. 描述具体，内容有侧重
+3. 包含标题、正文和结尾标签
+4. 直接输出评语内容，不要包含"标题:"、"正文:"、"结尾标签:"等格式标识词
+5. 结尾标签必须包含：#创作者赏金计划 #0元玩转这座城 #城市向导官# 优质创作者赏金计划
+
+图片分析结果：
+${analysisText}`;
+
+        try {
+            console.log('📝 正在生成评语，餐馆:', restaurantName);
+            
+            const response = await fetch(this.baseUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: 'glm-4-flash', // 评语生成使用文本模型
+                    messages: [{
+                        role: 'user',
+                        content: prompt
+                    }]
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                let errorData;
+                try {
+                    errorData = JSON.parse(errorText);
+                } catch (e) {
+                    errorData = { message: errorText };
+                }
+                throw new Error(errorData.error?.message || errorData.message || `API请求失败: ${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            const review = data.choices[0]?.message?.content || '';
+
+            if (!review) {
+                throw new Error('AI返回的评语为空');
+            }
+
+            console.log('✅ 评语生成成功，长度:', review.length);
+
+            return {
+                success: true,
+                review: review,
+                usage: data.usage || {}
+            };
+        } catch (error) {
+            console.error('生成评语失败:', error);
+            throw error;
+        }
+    }
 }
-*/
-// 暂时禁用AI服务加载，确保插件可以正常启动
-AIService = null;
-console.log('ℹ️ AI服务功能已禁用，插件基本功能正常可用');
+
+console.log('✅ AI服务代码已内联加载');
+
+// ============================================================================
+// 主程序代码
+// ============================================================================
+
+// AI服务实例（在需要时从storage加载配置并初始化）
+let aiServiceInstance = null;
+
+/**
+ * 检查AI服务代码是否已加载
+ */
+function checkAIServiceLoaded() {
+    // AIService类已经内联在代码中，直接检查
+    return typeof AIService !== 'undefined' && typeof AIService === 'function';
+}
+
+async function initAIService() {
+    try {
+        // 检查AI服务代码是否已加载（已内联在代码中）
+        if (!checkAIServiceLoaded()) {
+            console.warn('⚠️ AIService未定义，AI功能将不可用');
+            aiServiceInstance = null;
+            return;
+        }
+        
+        const result = await chrome.storage.sync.get(['aiConfig']);
+        const aiConfig = result.aiConfig;
+        
+        console.log('🔍 检查AI配置:', {
+            hasConfig: !!aiConfig,
+            enabled: aiConfig?.enabled,
+            hasApiKey: !!aiConfig?.apiKey,
+            apiKeyLength: aiConfig?.apiKey?.length || 0
+        });
+        
+        if (aiConfig && aiConfig.enabled && aiConfig.apiKey) {
+            try {
+                
+                // 构建AI服务配置（适配AIService构造函数）
+                const serviceConfig = {
+                    apiKey: aiConfig.apiKey,
+                    model: aiConfig.model || aiConfig.apiUrl ? 'glm-4v-plus' : 'glm-4-flash',
+                    baseUrl: aiConfig.apiUrl || aiConfig.baseUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+                    enabled: aiConfig.enabled
+                };
+                
+                // 创建AI服务实例
+                aiServiceInstance = new AIService(serviceConfig);
+                
+                // 验证服务是否可用
+                if (aiServiceInstance.isAvailable()) {
+                    console.log('✅ AI服务已初始化并可用');
+                } else {
+                    console.warn('⚠️ AI服务已创建但不可用');
+                    aiServiceInstance = null;
+                }
+            } catch (error) {
+                console.warn('⚠️ 创建AI服务实例失败:', error.message);
+                console.error('错误详情:', error);
+                aiServiceInstance = null;
+            }
+        } else {
+            console.log('ℹ️ AI服务未配置，AI功能将不可用');
+            if (aiConfig) {
+                console.log('配置详情:', {
+                    enabled: aiConfig.enabled,
+                    hasApiKey: !!aiConfig.apiKey
+                });
+            }
+            aiServiceInstance = null;
+        }
+    } catch (error) {
+        console.error('初始化AI服务失败:', error);
+        console.error('错误堆栈:', error.stack);
+        aiServiceInstance = null;
+    }
+}
 
 // 全局状态
 let downloadQueue = [];
@@ -83,26 +345,20 @@ initAIService().then(() => {
     console.error('❌ 初始化失败:', error);
 });
 
+// 监听存储变化，重新初始化AI服务
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'sync' && changes.aiConfig) {
+        initAIService();
+    }
+});
+
 /**
- * 检查服务器是否运行
+ * 检查服务器是否运行（已废弃 - 插件现在完全独立运行）
+ * 保留此函数以保持向后兼容，但始终返回false，因为不再需要服务器
  */
 async function checkServerRunning() {
-    try {
-        // 使用 AbortController 实现超时（兼容性更好）
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
-        
-        const response = await fetch('http://localhost:3000/api/status', {
-            method: 'GET',
-            signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-        return response.ok;
-    } catch (error) {
-        // 超时或其他错误都返回 false
-        return false;
-    }
+    // 插件现在完全独立运行，不需要后端服务器
+    return false;
 }
 
 /**
@@ -163,65 +419,21 @@ async function startServer() {
 }
 
 /**
- * 监听插件按钮点击事件 - 检查并启动服务器，然后打开网页界面
+ * 监听插件按钮点击事件
+ * 注意：如果manifest.json中配置了default_popup，点击按钮会自动打开popup
+ * 这个监听器只在没有配置default_popup时才会触发
  */
 chrome.action.onClicked.addListener(async (tab) => {
-    console.log('🖱️ 插件图标被点击');
+    console.log('🖱️ 插件图标被点击（未配置default_popup）');
     console.log('📋 当前标签页:', tab);
     
+    // 如果配置了default_popup，这个监听器不会触发
+    // 如果没有配置，打开Options页面作为备选
     try {
-        const webInterfaceUrl = 'http://localhost:3000';
-        
-        console.log('🔍 检查服务器是否运行...');
-        // 首先检查服务器是否运行
-        const isRunning = await checkServerRunning();
-        console.log('✅ 服务器运行状态:', isRunning);
-        
-        if (!isRunning) {
-            // 服务器未运行，直接提示用户并打开页面
-            console.log('⚠️ 服务器未运行，显示提示');
-            
-            // 显示通知提示用户启动服务器
-            chrome.notifications.create({
-                type: 'basic',
-                iconUrl: chrome.runtime.getURL('assets/icons/icon48.png'),
-                title: '需要启动服务器',
-                message: '请在项目目录的终端运行: npm run start:web:background (详细说明请查看README.md)',
-                priority: 2
-            });
-            
-            // 仍然尝试打开页面（让浏览器显示错误页面）
-            console.log('📄 尝试打开页面（服务器未运行）');
-        }
-        
-        // 检查是否已经打开了该URL的标签页
-        console.log('🔍 查找已打开的标签页...');
-        const tabs = await chrome.tabs.query({ 
-            url: ['http://localhost:3000/*', 'http://127.0.0.1:3000/*']
-        });
-        console.log('📋 找到的标签页数量:', tabs.length);
-        
-        if (tabs.length > 0) {
-            // 如果已经打开，激活该标签页
-            console.log('✅ 激活已存在的标签页:', tabs[0].id);
-            await chrome.tabs.update(tabs[0].id, { active: true });
-            await chrome.windows.update(tabs[0].windowId, { focused: true });
-            console.log('✅ 已激活Web界面标签页');
-        } else {
-            // 如果没有打开，创建新标签页
-            console.log('📄 创建新标签页...');
-            const newTab = await chrome.tabs.create({ url: webInterfaceUrl });
-            console.log('✅ 已打开Web界面:', webInterfaceUrl, '标签页ID:', newTab.id);
-        }
+        await chrome.runtime.openOptionsPage();
+        console.log('✅ 已打开插件设置页面');
     } catch (error) {
-        console.error('打开网页界面失败:', error);
-        // 显示错误通知
-        chrome.notifications.create({
-            type: 'basic',
-            iconUrl: chrome.runtime.getURL('assets/icons/icon48.png'),
-            title: '打开Web界面失败',
-            message: '请确保Web界面服务器已启动 (npm run start:web:background)'
-        });
+        console.error('打开插件界面失败:', error);
     }
 });
 
@@ -268,6 +480,32 @@ async function handleStartDownload(data) {
     
     if (!restaurants || restaurants.length === 0) {
         return { success: false, error: '餐馆列表为空' };
+    }
+    
+    console.log('📥 收到下载请求:', {
+        restaurantCount: restaurants.length,
+        config: {
+            maxImages: config.maxImages,
+            removeWatermark: config.removeWatermark,
+            enableProcessing: config.enableProcessing,
+            enableAI: config.enableAI,
+            hasAiConfig: !!config.aiConfig
+        }
+    });
+    
+    // 如果启用AI，确保AI服务已初始化
+    if (config.enableAI && config.aiConfig) {
+        console.log('🔧 检查AI服务配置...');
+        // 更新AI配置
+        await chrome.storage.sync.set({ aiConfig: config.aiConfig });
+        // 重新初始化AI服务（代码已内联）
+        await initAIService();
+        
+        if (aiServiceInstance && aiServiceInstance.isAvailable()) {
+            console.log('✅ AI服务已就绪');
+        } else {
+            console.warn('⚠️ AI服务未就绪，AI功能将不可用');
+        }
     }
     
     // 初始化下载队列
@@ -405,22 +643,58 @@ async function executeSearch(tabId, restaurant, config) {
     await downloadImages(imageUrls, restaurant, config);
     
     // AI分析（如果启用）
-    if (config.enableAI && aiServiceInstance && aiServiceInstance.isAvailable()) {
-        try {
-            sendLog(`开始AI分析: ${restaurant.name}`, 'info');
-            const aiResult = await performAIAnalysis(imageUrls, restaurant, config);
-            if (aiResult && aiResult.success) {
-                sendLog(`AI分析完成: ${restaurant.name}`, 'success');
-            }
-        } catch (error) {
-            console.error('AI分析失败:', error);
-            sendLog(`AI分析失败: ${error.message}`, 'error');
+    console.log('🔍 检查AI分析条件:', {
+        enableAI: config.enableAI,
+        hasAiConfig: !!config.aiConfig,
+        aiServiceInstanceExists: !!aiServiceInstance,
+        aiServiceAvailable: aiServiceInstance ? aiServiceInstance.isAvailable() : false
+    });
+    
+    if (config.enableAI) {
+        console.log('✅ enableAI为true，准备进行AI分析');
+        
+        // 重新检查AI服务（配置可能已更新）
+        if (!aiServiceInstance) {
+            console.log('🔄 AI服务实例不存在，重新初始化...');
+            // AI服务代码已内联，直接初始化
+            await initAIService();
         }
+        
+        console.log('🔍 AI服务状态检查:', {
+            instanceExists: !!aiServiceInstance,
+            isAvailable: aiServiceInstance ? aiServiceInstance.isAvailable() : false,
+            hasApiKey: aiServiceInstance ? !!aiServiceInstance.apiKey : false
+        });
+        
+        if (aiServiceInstance && aiServiceInstance.isAvailable()) {
+            try {
+                console.log('🚀 开始AI分析流程');
+                sendLog(`开始AI分析: ${restaurant.name}`, 'info');
+                const aiResult = await performAIAnalysis(imageUrls, restaurant, config);
+                if (aiResult && aiResult.success) {
+                    sendLog(`AI分析完成: ${restaurant.name}`, 'success');
+                    console.log('✅ AI分析成功完成');
+                } else {
+                    console.warn('⚠️ AI分析返回失败:', aiResult);
+                    sendLog(`AI分析失败: ${aiResult?.error || '未知错误'}`, 'error');
+                }
+            } catch (error) {
+                console.error('❌ AI分析异常:', error);
+                console.error('错误堆栈:', error.stack);
+                sendLog(`AI分析失败: ${error.message}`, 'error');
+            }
+        } else {
+            const reason = !aiServiceInstance ? 'AI服务实例未创建' : 'AI服务不可用（可能未配置API密钥）';
+            console.warn('⚠️ 跳过AI分析:', reason);
+            sendLog(`AI服务未配置，跳过AI分析: ${reason}`, 'warning');
+        }
+    } else {
+        console.log('ℹ️ enableAI为false，跳过AI分析');
     }
 }
 
 /**
- * 下载图片
+ * 下载图片（支持图片处理去水印）
  */
 async function downloadImages(imageUrls, restaurant, config) {
     const maxImages = Math.min(imageUrls.length, config.maxImages || 6);
@@ -431,22 +705,65 @@ async function downloadImages(imageUrls, restaurant, config) {
         const imageUrl = imageUrls[i];
         
         try {
-            // 处理水印去除（如果需要）
             let finalUrl = imageUrl;
-            if (config.removeWatermark) {
+            
+            // 如果启用了去水印，需要在Content Script中处理图片
+            if (config.removeWatermark || config.enableProcessing) {
+                // 找到小红书标签页
+                const tabs = await chrome.tabs.query({ 
+                    url: ['https://www.xiaohongshu.com/*', 'https://*.xiaohongshu.com/*'] 
+                });
+                
+                if (tabs.length > 0) {
+                    // 在Content Script中处理图片
+                    const processedResult = await chrome.tabs.sendMessage(tabs[0].id, {
+                        action: 'processImage',
+                        data: {
+                            imageUrl: imageUrl,
+                            removeWatermark: config.removeWatermark || false,
+                            enableProcessing: config.enableProcessing || false
+                        }
+                    });
+                    
+                    if (processedResult && processedResult.success && processedResult.blobUrl) {
+                        finalUrl = processedResult.blobUrl;
+                    } else {
+                        // 如果处理失败，使用原始URL（移除水印参数）
+                        finalUrl = removeWatermarkParams(imageUrl);
+                    }
+                } else {
+                    // 没有小红书标签页，只移除URL参数
+                    finalUrl = removeWatermarkParams(imageUrl);
+                }
+            } else {
+                // 不处理，只移除URL参数
                 finalUrl = removeWatermarkParams(imageUrl);
             }
             
             // 生成文件名
             const filename = generateFilename(restaurant.name, i + 1, finalUrl);
             
-            // 使用Chrome下载API下载
-            await chrome.downloads.download({
-                url: finalUrl,
-                filename: filename,
-                saveAs: false
+            console.log(`📥 开始下载图片 ${i + 1}/${maxImages}:`, {
+                url: finalUrl.substring(0, 100) + '...',
+                filename: filename
             });
             
+            // 使用Chrome下载API下载
+            const downloadId = await new Promise((resolve, reject) => {
+                chrome.downloads.download({
+                    url: finalUrl,
+                    filename: filename,
+                    saveAs: false
+                }, (id) => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                    } else {
+                        resolve(id);
+                    }
+                });
+            });
+            
+            console.log(`✅ 图片 ${i + 1} 下载已启动，下载ID:`, downloadId);
             downloadedCount++;
             sendLog(`已下载图片 ${i + 1}/${maxImages}`, 'success');
             
@@ -474,17 +791,25 @@ function generateFilename(restaurantName, index, url) {
     // 获取文件扩展名
     let ext = 'jpg';
     try {
-        const urlObj = new URL(url);
-        const pathname = urlObj.pathname;
-        const match = pathname.match(/\.(jpg|jpeg|png|gif|webp)$/i);
-        if (match) {
-            ext = match[1].toLowerCase();
+        // 如果是blob URL，使用默认扩展名
+        if (url.startsWith('blob:')) {
+            ext = 'jpg';
+        } else {
+            const urlObj = new URL(url);
+            const pathname = urlObj.pathname;
+            const match = pathname.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+            if (match) {
+                ext = match[1].toLowerCase();
+            }
         }
     } catch (e) {
         // 使用默认扩展名
+        console.warn('无法从URL获取扩展名，使用默认jpg:', e.message);
     }
     
-    return `downloads/${cleanName}/image_${String(index).padStart(3, '0')}.${ext}`;
+    const filename = `downloads/${cleanName}/image_${String(index).padStart(3, '0')}.${ext}`;
+    console.log('📝 生成文件名:', filename);
+    return filename;
 }
 
 /**
@@ -504,7 +829,7 @@ function removeWatermarkParams(url) {
 }
 
 /**
- * 检查登录状态
+ * 检查登录状态（使用Chrome Cookies API）
  */
 async function handleCheckLoginStatus() {
     try {
@@ -515,42 +840,57 @@ async function handleCheckLoginStatus() {
         
         // 检查是否有有效的登录Cookie
         const hasValidCookies = cookies.length > 0;
-        const hasSessionCookie = cookies.some(cookie => 
-            cookie.name.includes('session') || 
-            cookie.name.includes('token') || 
-            cookie.name.includes('web_session')
+        
+        // 检查关键Cookie（登录状态相关）
+        const keyCookieNames = ['web_session', 'a1', 'webId', 'websectiga', 'sec_poison_id'];
+        const hasKeyCookies = cookies.some(cookie => 
+            keyCookieNames.some(name => cookie.name.includes(name))
         );
         
-        // 尝试获取当前活动标签页检查登录状态
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        let pageLoggedIn = false;
+        // 尝试获取小红书标签页检查页面登录状态
+        const tabs = await chrome.tabs.query({ 
+            url: ['https://www.xiaohongshu.com/*', 'https://*.xiaohongshu.com/*'] 
+        });
         
-        if (tabs.length > 0 && tabs[0].url.includes('xiaohongshu.com')) {
+        let pageLoggedIn = false;
+        if (tabs.length > 0) {
             try {
                 const result = await chrome.tabs.sendMessage(tabs[0].id, {
                     action: 'checkLoginStatus'
                 });
                 pageLoggedIn = result?.loggedIn || false;
             } catch (error) {
-                // Content script可能未加载
-                console.log('无法检查页面登录状态:', error);
+                // Content script可能未加载，忽略错误
+                console.log('无法检查页面登录状态（可能未在小红书页面）:', error.message);
             }
         }
         
-        const loggedIn = hasValidCookies && (hasSessionCookie || pageLoggedIn);
+        // 综合判断：有Cookie且（有关键Cookie或页面显示已登录）
+        const loggedIn = hasValidCookies && (hasKeyCookies || pageLoggedIn);
+        
+        // 计算登录评分（0-10）
+        let loginScore = 0;
+        if (hasValidCookies) {
+            loginScore += 2; // 有Cookie基础分
+            if (hasKeyCookies) loginScore += 3; // 有关键Cookie
+            if (pageLoggedIn) loginScore += 5; // 页面确认已登录
+        }
         
         return {
             success: true,
             loggedIn,
+            loginScore,
             cookieCount: cookies.length,
-            hasSessionCookie
+            hasKeyCookies,
+            pageLoggedIn
         };
     } catch (error) {
         console.error('检查登录状态失败:', error);
         return {
             success: false,
             error: error.message,
-            loggedIn: false
+            loggedIn: false,
+            loginScore: 0
         };
     }
 }
@@ -648,9 +988,19 @@ function sendDownloadComplete() {
 // 监听下载事件
 chrome.downloads.onChanged.addListener((downloadDelta) => {
     if (downloadDelta.state && downloadDelta.state.current === 'complete') {
-        console.log('下载完成:', downloadDelta.id);
+        console.log('✅ 下载完成:', downloadDelta.id);
+        chrome.downloads.search({ id: downloadDelta.id }, (results) => {
+            if (results && results[0]) {
+                console.log('📁 文件已保存到:', results[0].filename);
+            }
+        });
     } else if (downloadDelta.state && downloadDelta.state.current === 'interrupted') {
-        console.log('下载中断:', downloadDelta.id);
+        console.error('❌ 下载中断:', downloadDelta.id);
+        if (downloadDelta.error) {
+            console.error('错误原因:', downloadDelta.error.current);
+        }
+    } else if (downloadDelta.error) {
+        console.error('❌ 下载错误:', downloadDelta.id, downloadDelta.error.current);
     }
 });
 
@@ -658,38 +1008,108 @@ chrome.downloads.onChanged.addListener((downloadDelta) => {
  * 执行AI分析
  */
 async function performAIAnalysis(imageUrls, restaurant, config) {
+    console.log('🤖 开始AI分析流程:', {
+        restaurant: restaurant.name,
+        imageCount: imageUrls.length,
+        aiServiceAvailable: aiServiceInstance && aiServiceInstance.isAvailable()
+    });
+    
     if (!aiServiceInstance || !aiServiceInstance.isAvailable()) {
-        return { success: false, error: 'AI服务未启用' };
+        const errorMsg = 'AI服务未启用或未配置API密钥';
+        console.warn('⚠️', errorMsg);
+        sendLog(errorMsg, 'warning');
+        return { success: false, error: errorMsg };
     }
     
     try {
-        // 分析图片
-        const analysisResults = await aiServiceInstance.analyzeImages(
-            imageUrls.slice(0, 5), // 最多分析5张图片
-            '请详细分析这张餐馆图片，包括：1.菜品特色 2.环境氛围 3.装修风格 4.推荐亮点 5.适合场景'
-        );
+        // 分析图片（最多分析5张）
+        const imagesToAnalyze = imageUrls.slice(0, 5);
+        sendLog(`正在分析 ${imagesToAnalyze.length} 张图片...`, 'info');
+        console.log('🖼️ 开始分析图片，数量:', imagesToAnalyze.length);
+        
+        const analysisResults = [];
+        for (let i = 0; i < imagesToAnalyze.length; i++) {
+            try {
+                sendLog(`分析图片 ${i + 1}/${imagesToAnalyze.length}...`, 'info');
+                console.log(`📸 分析图片 ${i + 1}:`, imagesToAnalyze[i]);
+                
+                const result = await aiServiceInstance.analyzeImages(
+                    imagesToAnalyze[i],
+                    '请详细分析这张餐馆图片，包括：1.菜品特色 2.环境氛围 3.装修风格 4.推荐亮点 5.适合场景'
+                );
+                
+                if (result && result.success && result.content) {
+                    analysisResults.push(result);
+                    sendLog(`图片 ${i + 1} 分析完成`, 'success');
+                    console.log(`✅ 图片 ${i + 1} 分析完成，内容长度:`, result.content.length);
+                } else {
+                    console.warn(`⚠️ 图片 ${i + 1} 分析结果异常:`, result);
+                    sendLog(`图片 ${i + 1} 分析结果异常`, 'warning');
+                }
+            } catch (error) {
+                console.error(`❌ 分析图片 ${i + 1} 失败:`, error);
+                sendLog(`分析图片 ${i + 1} 失败: ${error.message}`, 'error');
+            }
+        }
+        
+        console.log('📊 分析结果统计:', {
+            total: imagesToAnalyze.length,
+            success: analysisResults.length
+        });
+        
+        if (analysisResults.length === 0) {
+            const errorMsg = '没有成功分析的图片';
+            console.error('❌', errorMsg);
+            sendLog(errorMsg, 'error');
+            return { success: false, error: errorMsg };
+        }
         
         // 生成评语
+        sendLog('正在生成评语...', 'info');
+        console.log('📝 开始生成评语，餐馆:', restaurant.name);
+        
         const reviewResult = await aiServiceInstance.generateReview(
             analysisResults,
             restaurant.name,
             restaurant.location || ''
         );
         
-        if (reviewResult.success) {
+        if (reviewResult.success && reviewResult.review) {
             // 保存评语到下载目录
-            const filename = `downloads/${restaurant.name.replace(/[<>:"/\\|?*]/g, '_')}/评语.md`;
-            // 注意：Chrome插件中无法直接写入文件，需要通过下载API保存
-            const blob = new Blob([reviewResult.review], { type: 'text/plain;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
+            const cleanName = restaurant.name.replace(/[<>:"/\\|?*]/g, '_');
+            const filename = `downloads/${cleanName}/评语.md`;
             
-            await chrome.downloads.download({
-                url: url,
-                filename: filename,
-                saveAs: false
-            });
+            console.log('💾 保存评语到:', filename);
+            sendLog(`保存评语到: ${filename}`, 'info');
             
-            URL.revokeObjectURL(url);
+            // 在Service Worker中，不能使用URL.createObjectURL
+            // 使用data URL来下载文本文件
+            try {
+                // 将文本内容编码为base64
+                const textContent = reviewResult.review;
+                const base64Content = btoa(unescape(encodeURIComponent(textContent)));
+                const dataUrl = `data:text/plain;charset=utf-8;base64,${base64Content}`;
+                
+                console.log('📄 创建data URL，内容长度:', textContent.length);
+                
+                await chrome.downloads.download({
+                    url: dataUrl,
+                    filename: filename,
+                    saveAs: false
+                });
+                
+                sendLog('评语已保存', 'success');
+                console.log('✅ 评语已保存:', filename);
+            } catch (downloadError) {
+                console.error('❌ 保存评语文件失败:', downloadError);
+                sendLog(`保存评语失败: ${downloadError.message}`, 'error');
+                throw downloadError;
+            }
+        } else {
+            const errorMsg = reviewResult.error || '生成评语失败';
+            console.error('❌', errorMsg, reviewResult);
+            sendLog(errorMsg, 'error');
+            return { success: false, error: errorMsg };
         }
         
         return {
@@ -698,7 +1118,8 @@ async function performAIAnalysis(imageUrls, restaurant, config) {
             review: reviewResult.review
         };
     } catch (error) {
-        console.error('AI分析失败:', error);
+        console.error('❌ AI分析失败:', error);
+        sendLog(`AI分析失败: ${error.message}`, 'error');
         return {
             success: false,
             error: error.message
@@ -706,12 +1127,6 @@ async function performAIAnalysis(imageUrls, restaurant, config) {
     }
 }
 
-// 监听存储变化，重新初始化AI服务
-chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === 'sync' && changes.aiConfig) {
-        initAIService();
-    }
-});
-
 console.log('Background Script 已加载');
+
 

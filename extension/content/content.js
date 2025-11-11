@@ -63,6 +63,14 @@
                     document.body.removeChild(textArea);
                 });
                 return true;
+            } else if (message.action === 'processImage') {
+                // 处理图片（去水印）
+                handleProcessImage(message.data).then(result => {
+                    sendResponse(result);
+                }).catch(error => {
+                    sendResponse({ success: false, error: error.message });
+                });
+                return true;
             }
         });
 
@@ -151,6 +159,67 @@
                 success: false,
                 error: error.message,
                 imageUrls: []
+            };
+        }
+    }
+
+    /**
+     * 处理图片（去水印）
+     * @param {Object} data - 处理数据
+     * @param {string} data.imageUrl - 图片URL
+     * @param {boolean} data.removeWatermark - 是否去水印
+     * @param {boolean} data.enableProcessing - 是否启用处理
+     * @returns {Promise<Object>} 处理结果
+     */
+    async function handleProcessImage(data) {
+        const { imageUrl, removeWatermark = true, enableProcessing = true } = data;
+        
+        try {
+            // 加载ImageProcessor（如果已加载）
+            if (typeof ImageProcessor === 'undefined') {
+                // 尝试从lib目录加载
+                const script = document.createElement('script');
+                script.src = chrome.runtime.getURL('lib/image-processor.js');
+                document.head.appendChild(script);
+                
+                // 等待脚本加载
+                await new Promise((resolve, reject) => {
+                    script.onload = resolve;
+                    script.onerror = reject;
+                    setTimeout(reject, 5000); // 5秒超时
+                });
+            }
+            
+            if (removeWatermark || enableProcessing) {
+                // 使用ImageProcessor处理图片
+                const blob = await ImageProcessor.processImage(imageUrl, {
+                    removeWatermark: removeWatermark,
+                    cropWatermark: true,
+                    watermarkRegion: { width: 0.15, height: 0.10 }
+                });
+                
+                // 创建Blob URL
+                const blobUrl = URL.createObjectURL(blob);
+                
+                return {
+                    success: true,
+                    blobUrl: blobUrl,
+                    originalUrl: imageUrl
+                };
+            } else {
+                // 不处理，直接返回原URL
+                return {
+                    success: true,
+                    blobUrl: imageUrl,
+                    originalUrl: imageUrl
+                };
+            }
+        } catch (error) {
+            console.error('图片处理失败:', error);
+            return {
+                success: false,
+                error: error.message,
+                originalUrl: imageUrl
             };
         }
     }

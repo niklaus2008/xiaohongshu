@@ -17,7 +17,7 @@ class ImageProcessor {
         const {
             removeWatermark = true,
             cropWatermark = true,
-            watermarkRegion = { x: 0.85, y: 0.90, width: 0.15, height: 0.10 }
+            watermarkRegion = { width: 0.15, height: 0.10 } // 右下角15%宽度 × 10%高度
         } = options;
 
         return new Promise((resolve, reject) => {
@@ -30,18 +30,18 @@ class ImageProcessor {
                     const ctx = canvas.getContext('2d');
 
                     if (removeWatermark && cropWatermark) {
-                        // 裁剪去除右下角水印区域
+                        // 裁剪去除右下角水印区域（保留左上部分）
                         const cropWidth = Math.floor(img.width * (1 - watermarkRegion.width));
                         const cropHeight = Math.floor(img.height * (1 - watermarkRegion.height));
                         
                         canvas.width = cropWidth;
                         canvas.height = cropHeight;
                         
-                        // 绘制裁剪后的图片
+                        // 绘制裁剪后的图片（从左上角开始，裁剪掉右下角）
                         ctx.drawImage(
                             img,
-                            0, 0, cropWidth, cropHeight,
-                            0, 0, cropWidth, cropHeight
+                            0, 0, cropWidth, cropHeight,  // 源图片区域
+                            0, 0, cropWidth, cropHeight   // 目标画布区域
                         );
                     } else {
                         // 不裁剪，直接绘制原图
@@ -50,7 +50,7 @@ class ImageProcessor {
                         ctx.drawImage(img, 0, 0);
                     }
 
-                    // 转换为Blob
+                    // 转换为Blob（高质量JPEG）
                     canvas.toBlob((blob) => {
                         if (blob) {
                             resolve(blob);
@@ -69,6 +69,17 @@ class ImageProcessor {
 
             img.src = imageUrl;
         });
+    }
+
+    /**
+     * 将图片URL转换为Blob URL（用于下载）
+     * @param {string} imageUrl - 图片URL
+     * @param {Object} options - 处理选项
+     * @returns {Promise<string>} Blob URL
+     */
+    static async processImageToBlobUrl(imageUrl, options = {}) {
+        const blob = await this.processImage(imageUrl, options);
+        return URL.createObjectURL(blob);
     }
 
     /**
