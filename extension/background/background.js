@@ -985,7 +985,8 @@ async function executeSearch(tabId, restaurant, config) {
     const extractResult = await sendMessageToTab(tabId, {
         action: 'extractImages',
         data: {
-            maxImages: config.maxImages || 6
+            maxImages: config.maxImages || 6,
+            filterFaces: config.filterFaces !== false // 默认启用，除非明确设置为false
         }
     });
     

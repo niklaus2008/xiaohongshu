@@ -50,6 +50,7 @@ const elements = {
     downloadDelay: document.getElementById('downloadDelay'),
     autoRemoveWatermark: document.getElementById('autoRemoveWatermark'),
     autoProcessImage: document.getElementById('autoProcessImage'),
+    filterFaces: document.getElementById('filterFaces'),
     showNotifications: document.getElementById('showNotifications'),
     autoOpenFolder: document.getElementById('autoOpenFolder'),
     addRestaurantModal: document.getElementById('addRestaurantModal'),
@@ -339,6 +340,7 @@ function getDefaultOptions() {
         aiRequestRetries: 3,
         autoRemoveWatermark: true,
         autoProcessImage: true,
+        filterFaces: true,
         showNotifications: false,
         autoOpenFolder: false
     };
@@ -391,6 +393,9 @@ function validateOptions(optionsData) {
     }
     if (typeof validated.autoProcessImage !== 'boolean') {
         validated.autoProcessImage = defaultOptions.autoProcessImage;
+    }
+    if (typeof validated.filterFaces !== 'boolean') {
+        validated.filterFaces = defaultOptions.filterFaces;
     }
     if (typeof validated.showNotifications !== 'boolean') {
         validated.showNotifications = defaultOptions.showNotifications;
@@ -461,6 +466,7 @@ async function loadAdvancedConfig() {
         elements.aiRequestRetries.value = Math.max(1, Math.min(10, options.aiRequestRetries || 3));
         elements.autoRemoveWatermark.checked = options.autoRemoveWatermark !== false;
         elements.autoProcessImage.checked = options.autoProcessImage !== false;
+        elements.filterFaces.checked = options.filterFaces !== false;
         elements.showNotifications.checked = options.showNotifications || false;
         elements.autoOpenFolder.checked = options.autoOpenFolder || false;
     } catch (error) {
@@ -480,6 +486,7 @@ async function loadAdvancedConfig() {
         elements.aiRequestRetries.value = defaultOptions.aiRequestRetries;
         elements.autoRemoveWatermark.checked = defaultOptions.autoRemoveWatermark;
         elements.autoProcessImage.checked = defaultOptions.autoProcessImage;
+        elements.filterFaces.checked = defaultOptions.filterFaces;
         elements.showNotifications.checked = defaultOptions.showNotifications;
         elements.autoOpenFolder.checked = defaultOptions.autoOpenFolder;
         
@@ -521,6 +528,7 @@ async function saveAdvancedConfig() {
             aiRequestRetries: parseInt(elements.aiRequestRetries.value) || 3,
             autoRemoveWatermark: elements.autoRemoveWatermark.checked,
             autoProcessImage: elements.autoProcessImage.checked,
+            filterFaces: elements.filterFaces.checked,
             showNotifications: elements.showNotifications.checked,
             autoOpenFolder: elements.autoOpenFolder.checked
         };
@@ -607,6 +615,7 @@ function bindEvents() {
     elements.downloadDelay.addEventListener('change', saveAdvancedConfig);
     elements.autoRemoveWatermark.addEventListener('change', saveAdvancedConfig);
     elements.autoProcessImage.addEventListener('change', saveAdvancedConfig);
+    elements.filterFaces.addEventListener('change', saveAdvancedConfig);
     elements.showNotifications.addEventListener('change', saveAdvancedConfig);
     elements.autoOpenFolder.addEventListener('change', saveAdvancedConfig);
     
@@ -1079,9 +1088,14 @@ async function handleStartDownload() {
         aiConfig = {};
     }
     
+    // 读取高级选项（包含filterFaces）
+    const optionsResult = await chrome.storage.local.get(['options']);
+    const options = optionsResult.options || {};
+    
     // 构建完整的配置对象
     const fullConfig = {
         ...config,
+        filterFaces: options.filterFaces !== false, // 默认启用，除非明确设置为false
         enableAI: aiConfig.enabled && !!aiConfig.apiKey, // 只有启用且有API密钥时才启用AI
         aiConfig: aiConfig // 传递完整的AI配置
     };
@@ -1090,6 +1104,7 @@ async function handleStartDownload() {
         maxImages: fullConfig.maxImages,
         removeWatermark: fullConfig.removeWatermark,
         enableProcessing: fullConfig.enableProcessing,
+        filterFaces: fullConfig.filterFaces,
         enableAI: fullConfig.enableAI,
         hasApiKey: !!aiConfig.apiKey
     });

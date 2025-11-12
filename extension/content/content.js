@@ -191,9 +191,9 @@
      * 处理提取图片请求
      */
     async function handleExtractImages(data) {
-        const { maxImages = 20 } = data;
+        const { maxImages = 20, filterFaces = true } = data;
         
-        console.log('开始提取图片，最大数量:', maxImages);
+        console.log('开始提取图片，最大数量:', maxImages, '是否过滤人脸:', filterFaces);
         
         try {
             // 确保页面已加载
@@ -202,15 +202,38 @@
             // 滚动加载更多内容
             await scrollToLoadMore();
             
-            // 提取图片URL
-            const imageUrls = await extractImageUrls(maxImages);
+            // 提取图片URL（提取更多图片，因为后续会过滤）
+            const extractCount = filterFaces ? maxImages * 2 : maxImages; // 如果需要过滤人脸，提取更多图片
+            const imageUrls = await extractImageUrls(extractCount);
             
             console.log('提取到图片数量:', imageUrls.length);
             
+            // 如果启用人脸过滤，过滤掉包含人脸的图片
+            let finalImageUrls = imageUrls;
+            if (filterFaces && typeof FaceDetector !== 'undefined' && imageUrls.length > 0) {
+                console.log('🔍 开始过滤包含人脸的图片...');
+                try {
+                    finalImageUrls = await FaceDetector.filterImagesWithoutFaces(imageUrls);
+                    // 如果过滤后数量不足，只取前maxImages张
+                    if (finalImageUrls.length > maxImages) {
+                        finalImageUrls = finalImageUrls.slice(0, maxImages);
+                    }
+                    console.log('✅ 人脸过滤完成，保留图片数量:', finalImageUrls.length);
+                } catch (error) {
+                    console.warn('⚠️ 人脸过滤失败，使用原始图片:', error.message);
+                    // 如果过滤失败，使用原始图片（只取前maxImages张）
+                    finalImageUrls = imageUrls.slice(0, maxImages);
+                }
+            } else if (imageUrls.length > maxImages) {
+                // 如果不需要过滤，只取前maxImages张
+                finalImageUrls = imageUrls.slice(0, maxImages);
+            }
+            
             return {
                 success: true,
-                imageUrls,
-                count: imageUrls.length
+                imageUrls: finalImageUrls,
+                count: finalImageUrls.length,
+                originalCount: imageUrls.length
             };
         } catch (error) {
             console.error('提取图片失败:', error);

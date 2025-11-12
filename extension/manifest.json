@@ -27,6 +27,7 @@
       ],
       "js": [
         "lib/image-processor.js",
+        "lib/face-detector.js",
         "content/content.js"
       ],
       "css": [
