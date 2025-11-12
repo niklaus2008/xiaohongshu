@@ -644,7 +644,9 @@ powershell -Command "Compress-Archive -Path extension -DestinationPath xiaohongs
 - ✅ **不需要Web服务器**
 - ✅ **只需要Chrome浏览器**
 
-📖 **详细说明**：请查看 [extension/打包部署指南.md](./extension/打包部署指南.md)
+📖 **详细说明**：
+- 📘 [插件加载指南](./extension/插件加载指南.md) - **推荐阅读**：详细的安装步骤和常见问题解答
+- 📦 [打包部署指南](./extension/打包部署指南.md) - 打包和分发说明
 
 ---
 
