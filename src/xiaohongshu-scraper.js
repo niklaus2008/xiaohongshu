@@ -1755,39 +1755,46 @@ class XiaohongshuScraper {
                 console.log('⚠️ 页面加载超时，继续执行...');
             }
             
-            // 尝试直接通过URL参数设置排序（最可靠的方法）
-            console.log('🏆 尝试通过URL设置"最多点赞"排序...');
-            const currentUrlObj = new URL(this.page.url());
-            let needUrlUpdate = false;
-            
-            // 检查是否需要添加排序参数
-            if (!currentUrlObj.searchParams.has('sort_type') || currentUrlObj.searchParams.get('sort_type') !== 'hot') {
-                currentUrlObj.searchParams.set('sort_type', 'hot'); // hot=最热，即最多点赞
-                needUrlUpdate = true;
-            }
-            
-            // 确保是图文类型
-            if (!currentUrlObj.searchParams.has('type') || currentUrlObj.searchParams.get('type') !== '51') {
-                currentUrlObj.searchParams.set('type', '51'); // 51=图文
-                needUrlUpdate = true;
-            }
-            
-            if (needUrlUpdate) {
-                const newUrl = currentUrlObj.toString();
-                console.log(`🔄 更新URL设置排序: ${newUrl}`);
-                await this.page.goto(newUrl, {
-                    waitUntil: 'domcontentloaded',
-                    timeout: 30000
-                });
-                await this.page.waitForTimeout(5000);
-                console.log('✅ URL排序参数已设置');
-            } else {
-                console.log('✅ URL已包含正确的排序参数');
-            }
-            
-            // 点击"图文"标签（备用方案）
+            // 点击"图文"标签
             console.log('📸 尝试点击图文标签...');
             await this.clickImageTab();
+            
+            // 优先尝试点击"最多点赞"排序按钮（符合用户操作习惯）
+            console.log('🏆 尝试点击页面上的"最多点赞"排序按钮...');
+            const clickSuccess = await this.clickMostLikedSort();
+            
+            // 如果点击失败，使用URL参数方式作为备用方案
+            if (!clickSuccess) {
+                console.log('⚠️ 点击排序按钮失败，切换到URL参数方式...');
+                console.log('🔄 尝试通过URL参数设置"最多点赞"排序...');
+                const currentUrlObj = new URL(this.page.url());
+                let needUrlUpdate = false;
+                
+                // 检查是否需要添加排序参数
+                if (!currentUrlObj.searchParams.has('sort_type') || currentUrlObj.searchParams.get('sort_type') !== 'hot') {
+                    currentUrlObj.searchParams.set('sort_type', 'hot'); // hot=最热，即最多点赞
+                    needUrlUpdate = true;
+                }
+                
+                // 确保是图文类型
+                if (!currentUrlObj.searchParams.has('type') || currentUrlObj.searchParams.get('type') !== '51') {
+                    currentUrlObj.searchParams.set('type', '51'); // 51=图文
+                    needUrlUpdate = true;
+                }
+                
+                if (needUrlUpdate) {
+                    const newUrl = currentUrlObj.toString();
+                    console.log(`🔄 更新URL设置排序: ${newUrl}`);
+                    await this.page.goto(newUrl, {
+                        waitUntil: 'domcontentloaded',
+                        timeout: 30000
+                    });
+                    await this.page.waitForTimeout(5000);
+                    console.log('✅ URL排序参数已设置（备用方案）');
+                } else {
+                    console.log('✅ URL已包含正确的排序参数');
+                }
+            }
             
         } catch (error) {
             console.error('❌ 搜索操作失败:', error.message);
@@ -1841,6 +1848,7 @@ class XiaohongshuScraper {
     /**
      * 点击"最多点赞"排序选项
      * @private
+     * @returns {Promise<boolean>} 是否成功点击
      */
     async clickMostLikedSort() {
         try {
@@ -1853,12 +1861,89 @@ class XiaohongshuScraper {
             const urlBefore = this.page.url();
             console.log(`📍 排序前URL: ${urlBefore}`);
             
-            // 查找"最多点赞"排序选项
-            // 根据小红书页面结构，排序选项通常在右侧边栏
+            // 步骤1: 先点击"筛选"按钮打开筛选菜单
+            console.log('🔘 步骤1: 尝试点击"筛选"按钮...');
+            const filterSelectors = [
+                'text=筛选',
+                'button:has-text("筛选")',
+                'div:has-text("筛选")',
+                '[class*="filter"]:has-text("筛选")',
+                '[class*="sort"]:has-text("筛选")'
+            ];
+            
+            let filterButton = null;
+            for (const selector of filterSelectors) {
+                try {
+                    filterButton = await this.page.waitForSelector(selector, { timeout: 3000 });
+                    if (filterButton) {
+                        console.log(`✅ 找到"筛选"按钮: ${selector}`);
+                        break;
+                    }
+                } catch (error) {
+                    continue;
+                }
+            }
+            
+            // 如果通过选择器找不到，尝试通过页面评估查找
+            if (!filterButton) {
+                console.log('🔍 通过页面评估查找"筛选"按钮...');
+                filterButton = await this.page.evaluateHandle(() => {
+                    const allElements = Array.from(document.querySelectorAll('*'));
+                    for (const el of allElements) {
+                        const text = el.textContent || el.innerText || '';
+                        if (text.trim() === '筛选' || (text.includes('筛选') && text.length < 10)) {
+                            const tagName = el.tagName.toLowerCase();
+                            if (tagName === 'button' || tagName === 'div' || tagName === 'span' || tagName === 'a') {
+                                const rect = el.getBoundingClientRect();
+                                if (rect.width > 0 && rect.height > 0) {
+                                    return el;
+                                }
+                            }
+                        }
+                    }
+                    return null;
+                });
+                
+                if (filterButton && filterButton.asElement()) {
+                    console.log('✅ 通过页面评估找到"筛选"按钮');
+                } else {
+                    filterButton = null;
+                }
+            }
+            
+            if (!filterButton) {
+                console.log('⚠️ 未找到"筛选"按钮，尝试直接查找"最多点赞"选项');
+            } else {
+                // 点击"筛选"按钮
+                try {
+                    await filterButton.click({ timeout: 3000 });
+                    console.log('✅ 已点击"筛选"按钮');
+                    await this.page.waitForTimeout(2000); // 等待筛选菜单展开
+                } catch (error) {
+                    console.warn('⚠️ 点击"筛选"按钮失败，尝试JavaScript点击');
+                    try {
+                        await this.page.evaluate((el) => {
+                            el.click();
+                        }, filterButton);
+                        console.log('✅ 已通过JavaScript点击"筛选"按钮');
+                        await this.page.waitForTimeout(2000);
+                    } catch (error2) {
+                        console.warn('⚠️ JavaScript点击也失败，继续尝试查找"最多点赞"');
+                    }
+                }
+            }
+            
+            // 步骤2: 在筛选菜单中查找"最多点赞"排序选项
+            console.log('🔘 步骤2: 在筛选菜单中查找"最多点赞"选项...');
             const sortSelectors = [
                 'text=最多点赞',
                 'text=Most Liked',
                 '[data-testid*="most-liked"]',
+                // 优先在筛选相关容器中查找
+                '[class*="filter"] button:has-text("最多点赞")',
+                '[class*="modal"] div:has-text("最多点赞")',
+                '[class*="popup"] div:has-text("最多点赞")',
+                '[class*="menu"] div:has-text("最多点赞")',
                 '.sort-item:has-text("最多点赞")',
                 'button:has-text("最多点赞")',
                 'div:has-text("最多点赞")',
@@ -1867,8 +1952,7 @@ class XiaohongshuScraper {
                 '.sort-by-item:has-text("最多点赞")',
                 '.filter-item:has-text("最多点赞")',
                 // 尝试通过父元素查找
-                '[class*="sort"]:has-text("最多点赞")',
-                '[class*="filter"]:has-text("最多点赞")'
+                '[class*="sort"]:has-text("最多点赞")'
             ];
             
             let sortButton = null;
@@ -1899,9 +1983,13 @@ class XiaohongshuScraper {
                                 // 确保元素可见且可点击
                                 const rect = el.getBoundingClientRect();
                                 if (rect.width > 0 && rect.height > 0) {
-                                    // 检查是否在排序区域（通常在右侧边栏）
-                                    const parent = el.closest('[class*="sort"], [class*="filter"], [class*="sidebar"], [class*="aside"]');
-                                    if (parent || rect.left > window.innerWidth * 0.6) {
+                                    // 优先查找在筛选弹窗中的元素
+                                    const parent = el.closest('[class*="sort"], [class*="filter"], [class*="modal"], [class*="popup"], [class*="menu"]');
+                                    if (parent) {
+                                        return el;
+                                    }
+                                    // 如果没有在特定容器中找到，检查是否在页面右侧
+                                    if (rect.left > window.innerWidth * 0.5) {
                                         return el;
                                     }
                                 }
@@ -1988,16 +2076,17 @@ class XiaohongshuScraper {
                 // 额外等待，确保排序结果完全加载
                 console.log('⏳ 额外等待排序结果完全加载...');
                 await this.page.waitForTimeout(3000);
+                console.log('✅ 成功点击"最多点赞"排序按钮');
+                return true; // 成功
                 
             } else {
                 console.log('⚠️ 未找到"最多点赞"排序选项');
-                console.log('💡 已通过URL参数设置排序，应该会生效');
+                return false; // 失败：未找到按钮
             }
             
         } catch (error) {
             console.error('❌ 点击"最多点赞"排序选项失败:', error.message);
-            console.log('💡 已通过URL参数设置排序，应该会生效');
-            // 不抛出错误，允许继续执行
+            return false; // 失败：发生错误
         }
     }
 

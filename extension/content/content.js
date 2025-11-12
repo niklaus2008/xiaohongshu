@@ -167,36 +167,43 @@
             // 等待搜索结果加载
             await waitForSearchResults();
             
-            // 尝试直接通过URL参数设置排序（最可靠的方法）
-            console.log('🏆 尝试通过URL设置"最多点赞"排序...');
-            const currentUrl = new URL(window.location.href);
-            let needUrlUpdate = false;
-            
-            // 检查是否需要添加排序参数
-            if (!currentUrl.searchParams.has('sort_type') || currentUrl.searchParams.get('sort_type') !== 'hot') {
-                currentUrl.searchParams.set('sort_type', 'hot'); // hot=最热，即最多点赞
-                needUrlUpdate = true;
-            }
-            
-            // 确保是图文类型
-            if (!currentUrl.searchParams.has('type') || currentUrl.searchParams.get('type') !== '51') {
-                currentUrl.searchParams.set('type', '51'); // 51=图文
-                needUrlUpdate = true;
-            }
-            
-            if (needUrlUpdate) {
-                const newUrl = currentUrl.toString();
-                console.log(`🔄 更新URL设置排序: ${newUrl}`);
-                window.location.href = newUrl;
-                await waitForPageLoad();
-                await waitForSearchResults();
-                console.log('✅ URL排序参数已设置');
-            } else {
-                console.log('✅ URL已包含正确的排序参数');
-            }
-            
-            // 点击"图文"标签（备用方案）
+            // 点击"图文"标签
             await clickImageTab();
+            
+            // 优先尝试点击"最多点赞"排序按钮（符合用户操作习惯）
+            console.log('🏆 尝试点击页面上的"最多点赞"排序按钮...');
+            const clickSuccess = await clickMostLikedSort();
+            
+            // 如果点击失败，使用URL参数方式作为备用方案
+            if (!clickSuccess) {
+                console.log('⚠️ 点击排序按钮失败，切换到URL参数方式...');
+                console.log('🔄 尝试通过URL参数设置"最多点赞"排序...');
+                const currentUrl = new URL(window.location.href);
+                let needUrlUpdate = false;
+                
+                // 检查是否需要添加排序参数
+                if (!currentUrl.searchParams.has('sort_type') || currentUrl.searchParams.get('sort_type') !== 'hot') {
+                    currentUrl.searchParams.set('sort_type', 'hot'); // hot=最热，即最多点赞
+                    needUrlUpdate = true;
+                }
+                
+                // 确保是图文类型
+                if (!currentUrl.searchParams.has('type') || currentUrl.searchParams.get('type') !== '51') {
+                    currentUrl.searchParams.set('type', '51'); // 51=图文
+                    needUrlUpdate = true;
+                }
+                
+                if (needUrlUpdate) {
+                    const newUrl = currentUrl.toString();
+                    console.log(`🔄 更新URL设置排序: ${newUrl}`);
+                    window.location.href = newUrl;
+                    await waitForPageLoad();
+                    await waitForSearchResults();
+                    console.log('✅ URL排序参数已设置（备用方案）');
+                } else {
+                    console.log('✅ URL已包含正确的排序参数');
+                }
+            }
             
             // 滚动加载更多内容
             await scrollToLoadMore();
@@ -487,6 +494,7 @@
 
     /**
      * 点击"最多点赞"排序选项
+     * @returns {Promise<boolean>} 是否成功点击
      */
     async function clickMostLikedSort() {
         return new Promise((resolve) => {
@@ -496,10 +504,37 @@
             const urlBefore = window.location.href;
             console.log(`📍 排序前URL: ${urlBefore}`);
             
-            // 等待页面稳定
+            // 步骤1: 先点击"筛选"按钮打开筛选菜单
+            console.log('🔘 步骤1: 尝试点击"筛选"按钮...');
+            const filterButton = Array.from(document.querySelectorAll('*')).find(el => {
+                const text = el.textContent || el.innerText || '';
+                if (text.trim() === '筛选' || (text.includes('筛选') && text.length < 10)) {
+                    const tagName = el.tagName.toLowerCase();
+                    if (tagName === 'button' || tagName === 'div' || tagName === 'span' || tagName === 'a') {
+                        const rect = el.getBoundingClientRect();
+                        return rect.width > 0 && rect.height > 0;
+                    }
+                }
+                return false;
+            });
+            
+            if (filterButton) {
+                console.log('✅ 找到"筛选"按钮');
+                try {
+                    // 点击"筛选"按钮
+                    filterButton.click();
+                    console.log('✅ 已点击"筛选"按钮');
+                } catch (error) {
+                    console.warn('⚠️ 点击"筛选"按钮失败:', error.message);
+                }
+            } else {
+                console.log('⚠️ 未找到"筛选"按钮，尝试直接查找"最多点赞"选项');
+            }
+            
+            // 等待筛选菜单展开（2秒）
             setTimeout(() => {
-                // 查找"最多点赞"排序选项
-                // 根据小红书页面结构，排序选项通常在右侧边栏
+                // 步骤2: 在筛选菜单中查找"最多点赞"排序选项
+                console.log('🔘 步骤2: 在筛选菜单中查找"最多点赞"选项...');
                 let sortOptions = null;
                 
                 // 方法1：通过文本查找
@@ -513,11 +548,16 @@
                             // 确保元素可见且可点击
                             const rect = el.getBoundingClientRect();
                             if (rect.width > 0 && rect.height > 0) {
-                                // 检查是否在排序区域（通常在右侧边栏）
-                                const parent = el.closest('[class*="sort"], [class*="filter"], [class*="sidebar"], [class*="aside"]');
-                                if (parent || rect.left > window.innerWidth * 0.6) {
+                                // 优先查找在筛选弹窗中的元素
+                                const parent = el.closest('[class*="sort"], [class*="filter"], [class*="modal"], [class*="popup"], [class*="menu"]');
+                                if (parent) {
                                     sortOptions = el;
+                                    console.log('✅ 在筛选菜单中找到"最多点赞"选项');
                                     break;
+                                }
+                                // 如果没有在特定容器中找到，检查是否在页面右侧
+                                if (!sortOptions && rect.left > window.innerWidth * 0.5) {
+                                    sortOptions = el;
                                 }
                             }
                         }
@@ -575,18 +615,19 @@
                                 
                                 // 额外等待，确保排序结果完全加载
                                 console.log('⏳ 额外等待排序结果完全加载...');
-                                setTimeout(resolve, 3000);
+                                setTimeout(() => {
+                                    console.log('✅ 成功点击"最多点赞"排序按钮');
+                                    resolve(true); // 成功
+                                }, 3000);
                             }, 5000);
                         } catch (error) {
                             console.warn('⚠️ 点击"最多点赞"排序选项失败:', error.message);
-                            console.log('💡 提示：如果搜索结果质量不佳，可能需要手动在小红书页面点击"最多点赞"排序');
-                            resolve();
+                            resolve(false); // 失败：点击出错
                         }
                     }, 1000);
                 } else {
-                    console.log('⚠️ 未找到"最多点赞"排序选项，继续使用默认排序');
-                    console.log('💡 提示：如果搜索结果质量不佳，可能需要手动在小红书页面点击"最多点赞"排序');
-                    resolve();
+                    console.log('⚠️ 未找到"最多点赞"排序选项');
+                    resolve(false); // 失败：未找到按钮
                 }
             }, 3000);
         });
