@@ -1755,8 +1755,38 @@ class XiaohongshuScraper {
                 console.log('⚠️ 页面加载超时，继续执行...');
             }
             
-            // 点击"图文"标签
-            console.log('📸 正在点击图文标签...');
+            // 尝试直接通过URL参数设置排序（最可靠的方法）
+            console.log('🏆 尝试通过URL设置"最多点赞"排序...');
+            const currentUrlObj = new URL(this.page.url());
+            let needUrlUpdate = false;
+            
+            // 检查是否需要添加排序参数
+            if (!currentUrlObj.searchParams.has('sort_type') || currentUrlObj.searchParams.get('sort_type') !== 'hot') {
+                currentUrlObj.searchParams.set('sort_type', 'hot'); // hot=最热，即最多点赞
+                needUrlUpdate = true;
+            }
+            
+            // 确保是图文类型
+            if (!currentUrlObj.searchParams.has('type') || currentUrlObj.searchParams.get('type') !== '51') {
+                currentUrlObj.searchParams.set('type', '51'); // 51=图文
+                needUrlUpdate = true;
+            }
+            
+            if (needUrlUpdate) {
+                const newUrl = currentUrlObj.toString();
+                console.log(`🔄 更新URL设置排序: ${newUrl}`);
+                await this.page.goto(newUrl, {
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30000
+                });
+                await this.page.waitForTimeout(5000);
+                console.log('✅ URL排序参数已设置');
+            } else {
+                console.log('✅ URL已包含正确的排序参数');
+            }
+            
+            // 点击"图文"标签（备用方案）
+            console.log('📸 尝试点击图文标签...');
             await this.clickImageTab();
             
         } catch (error) {
@@ -1805,6 +1835,169 @@ class XiaohongshuScraper {
             
         } catch (error) {
             console.error('❌ 点击图文标签失败:', error.message);
+        }
+    }
+
+    /**
+     * 点击"最多点赞"排序选项
+     * @private
+     */
+    async clickMostLikedSort() {
+        try {
+            console.log('🏆 尝试点击"最多点赞"排序选项...');
+            
+            // 等待页面稳定
+            await this.page.waitForTimeout(3000);
+            
+            // 记录点击前的URL，用于验证排序是否生效
+            const urlBefore = this.page.url();
+            console.log(`📍 排序前URL: ${urlBefore}`);
+            
+            // 查找"最多点赞"排序选项
+            // 根据小红书页面结构，排序选项通常在右侧边栏
+            const sortSelectors = [
+                'text=最多点赞',
+                'text=Most Liked',
+                '[data-testid*="most-liked"]',
+                '.sort-item:has-text("最多点赞")',
+                'button:has-text("最多点赞")',
+                'div:has-text("最多点赞")',
+                'a:has-text("最多点赞")',
+                // 尝试通过排序区域查找
+                '.sort-by-item:has-text("最多点赞")',
+                '.filter-item:has-text("最多点赞")',
+                // 尝试通过父元素查找
+                '[class*="sort"]:has-text("最多点赞")',
+                '[class*="filter"]:has-text("最多点赞")'
+            ];
+            
+            let sortButton = null;
+            for (const selector of sortSelectors) {
+                try {
+                    sortButton = await this.page.waitForSelector(selector, { timeout: 5000 });
+                    if (sortButton) {
+                        console.log(`✅ 找到"最多点赞"排序选项: ${selector}`);
+                        break;
+                    }
+                } catch (error) {
+                    continue;
+                }
+            }
+            
+            // 如果通过文本选择器找不到，尝试通过页面评估查找
+            if (!sortButton) {
+                console.log('🔍 尝试通过页面评估查找"最多点赞"排序选项...');
+                sortButton = await this.page.evaluateHandle(() => {
+                    // 查找所有包含"最多点赞"文本的元素
+                    const allElements = Array.from(document.querySelectorAll('*'));
+                    for (const el of allElements) {
+                        const text = el.textContent || el.innerText || '';
+                        // 更精确的匹配：只匹配完全包含"最多点赞"的元素
+                        if (text.trim() === '最多点赞' || text.includes('最多点赞')) {
+                            const tagName = el.tagName.toLowerCase();
+                            if (tagName === 'button' || tagName === 'a' || tagName === 'div' || tagName === 'span' || tagName === 'li') {
+                                // 确保元素可见且可点击
+                                const rect = el.getBoundingClientRect();
+                                if (rect.width > 0 && rect.height > 0) {
+                                    // 检查是否在排序区域（通常在右侧边栏）
+                                    const parent = el.closest('[class*="sort"], [class*="filter"], [class*="sidebar"], [class*="aside"]');
+                                    if (parent || rect.left > window.innerWidth * 0.6) {
+                                        return el;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return null;
+                });
+                
+                if (sortButton && sortButton.asElement()) {
+                    console.log('✅ 通过页面评估找到"最多点赞"排序选项');
+                } else {
+                    sortButton = null;
+                }
+            }
+            
+            if (sortButton) {
+                // 滚动到元素可见位置
+                await sortButton.scrollIntoViewIfNeeded();
+                await this.page.waitForTimeout(1000);
+                
+                // 尝试多种点击方式
+                try {
+                    // 方式1：直接点击
+                    await sortButton.click({ timeout: 5000 });
+                    console.log('✅ 已点击"最多点赞"排序选项（方式1：直接点击）');
+                } catch (error) {
+                    try {
+                        // 方式2：JavaScript点击
+                        await this.page.evaluate((el) => {
+                            el.click();
+                        }, sortButton);
+                        console.log('✅ 已点击"最多点赞"排序选项（方式2：JavaScript点击）');
+                    } catch (error2) {
+                        console.warn('⚠️ 点击排序选项失败，尝试强制点击');
+                        // 方式3：强制点击
+                        await sortButton.click({ force: true });
+                        console.log('✅ 已点击"最多点赞"排序选项（方式3：强制点击）');
+                    }
+                }
+                
+                // 等待排序结果加载（增加等待时间）
+                console.log('⏳ 等待排序结果加载...');
+                await this.page.waitForTimeout(5000);
+                
+                // 验证排序是否生效
+                const urlAfter = this.page.url();
+                console.log(`📍 排序后URL: ${urlAfter}`);
+                
+                // 检查URL是否包含排序参数，或者检查页面内容是否变化
+                const sortVerified = await this.page.evaluate(() => {
+                    // 检查URL参数
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const sortParam = urlParams.get('sort') || urlParams.get('order');
+                    
+                    // 检查页面中是否有"最多点赞"被选中（通常会有高亮或active状态）
+                    const activeSort = document.querySelector('[class*="active"]:has-text("最多点赞"), [class*="selected"]:has-text("最多点赞"), [class*="current"]:has-text("最多点赞")');
+                    
+                    // 检查排序按钮是否有active状态
+                    const sortButtons = Array.from(document.querySelectorAll('*')).filter(el => {
+                        const text = el.textContent || el.innerText || '';
+                        return text.includes('最多点赞');
+                    });
+                    
+                    const hasActiveSort = sortButtons.some(btn => {
+                        const classes = btn.className || '';
+                        return classes.includes('active') || classes.includes('selected') || classes.includes('current');
+                    });
+                    
+                    return {
+                        hasSortParam: !!sortParam,
+                        sortParam: sortParam,
+                        hasActiveSort: hasActiveSort || !!activeSort,
+                        urlChanged: window.location.href !== window.location.href // 这个检查会在外部进行
+                    };
+                });
+                
+                if (sortVerified.hasActiveSort || sortVerified.hasSortParam || urlAfter !== urlBefore) {
+                    console.log('✅ 排序验证成功:', sortVerified);
+                } else {
+                    console.warn('⚠️ 排序验证未通过，但继续执行:', sortVerified);
+                }
+                
+                // 额外等待，确保排序结果完全加载
+                console.log('⏳ 额外等待排序结果完全加载...');
+                await this.page.waitForTimeout(3000);
+                
+            } else {
+                console.log('⚠️ 未找到"最多点赞"排序选项');
+                console.log('💡 已通过URL参数设置排序，应该会生效');
+            }
+            
+        } catch (error) {
+            console.error('❌ 点击"最多点赞"排序选项失败:', error.message);
+            console.log('💡 已通过URL参数设置排序，应该会生效');
+            // 不抛出错误，允许继续执行
         }
     }
 
@@ -2426,31 +2619,63 @@ class XiaohongshuScraper {
                                 const width = img.naturalWidth || img.width || 0;
                                 const height = img.naturalHeight || img.height || 0;
                                 
-                                // 更严格的过滤条件，排除头像和系统图片
-                                const isLargeEnough = width > 200 && height > 200; // 提高尺寸要求
+                                // 合理的过滤条件，排除头像和系统图片
+                                const isLargeEnough = width > 200 && height > 200; // 合理的尺寸要求，过滤小图标
                                 const isNotAvatar = !img.src.includes('avatar') && 
                                                    !img.src.includes('icon') && 
                                                    !img.src.includes('profile') &&
                                                    !img.src.includes('head') &&
-                                                   !img.src.includes('user');
+                                                   !img.src.includes('user') &&
+                                                   !img.src.includes('portrait') &&
+                                                   !img.src.includes('face');
                                 const isNotSystem = !img.src.includes('logo') && 
                                                    !img.src.includes('banner') && 
                                                    !img.src.includes('button') &&
                                                    !img.src.includes('nav') &&
                                                    !img.src.includes('menu') &&
                                                    !img.src.includes('header') &&
-                                                   !img.src.includes('footer');
+                                                   !img.src.includes('footer') &&
+                                                   !img.src.includes('badge') &&
+                                                   !img.src.includes('mark') &&
+                                                   !img.src.includes('tag');
                                 const isNotEmoji = !img.src.includes('emoji') && 
                                                    !img.src.includes('smiley') &&
-                                                   !img.src.includes('sticker');
+                                                   !img.src.includes('sticker') &&
+                                                   !img.src.includes('expression');
                                 const isNotAd = !img.src.includes('ad') && 
                                                !img.src.includes('promo') &&
-                                               !img.src.includes('sponsor');
+                                               !img.src.includes('sponsor') &&
+                                               !img.src.includes('advertisement');
+                                
+                                // 检查图片URL中是否包含明显的人脸或图标关键词
+                                const urlLower = img.src.toLowerCase();
+                                const isNotPerson = !urlLower.includes('person') && 
+                                                   !urlLower.includes('people') &&
+                                                   !urlLower.includes('selfie') &&
+                                                   !urlLower.includes('portrait') &&
+                                                   !urlLower.includes('face') &&
+                                                   !urlLower.includes('headshot');
+                                
+                                // 检查图片尺寸比例，排除明显是头像的图片（正方形小图）
+                                const aspectRatio = width > 0 && height > 0 ? width / height : 1;
+                                const isNotSquareIcon = !(aspectRatio > 0.9 && aspectRatio < 1.1 && width < 200 && height < 200);
+                                
+                                // 检查图片是否在图标或头像容器中
+                                const isNotInIconContainer = !img.closest('.avatar, .icon, .user-icon, .profile-pic, [class*="avatar"], [class*="user-head"]');
                                 
                                 // 检查图片是否在内容区域内（不是页面装饰元素）
                                 const isInContentArea = img.closest('.note-item, .feed-item, .content-item, .note-card, .search-item, .result-item, article, .card');
                                 
-                                if (isLargeEnough && isNotAvatar && isNotSystem && isNotEmoji && isNotAd && isInContentArea) {
+                                // 增强过滤条件：添加人脸和图标容器检查
+                                if (isLargeEnough && 
+                                    isNotAvatar && 
+                                    isNotSystem && 
+                                    isNotEmoji && 
+                                    isNotAd && 
+                                    isNotPerson && 
+                                    isNotSquareIcon &&
+                                    isNotInIconContainer &&
+                                    isInContentArea) {
                                     let imageUrl = img.src;
                                     
                                     // 只做基本的URL优化（在page.evaluate内部无法访问this.config）

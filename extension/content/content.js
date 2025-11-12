@@ -167,7 +167,35 @@
             // 等待搜索结果加载
             await waitForSearchResults();
             
-            // 点击"图文"标签（如果存在）
+            // 尝试直接通过URL参数设置排序（最可靠的方法）
+            console.log('🏆 尝试通过URL设置"最多点赞"排序...');
+            const currentUrl = new URL(window.location.href);
+            let needUrlUpdate = false;
+            
+            // 检查是否需要添加排序参数
+            if (!currentUrl.searchParams.has('sort_type') || currentUrl.searchParams.get('sort_type') !== 'hot') {
+                currentUrl.searchParams.set('sort_type', 'hot'); // hot=最热，即最多点赞
+                needUrlUpdate = true;
+            }
+            
+            // 确保是图文类型
+            if (!currentUrl.searchParams.has('type') || currentUrl.searchParams.get('type') !== '51') {
+                currentUrl.searchParams.set('type', '51'); // 51=图文
+                needUrlUpdate = true;
+            }
+            
+            if (needUrlUpdate) {
+                const newUrl = currentUrl.toString();
+                console.log(`🔄 更新URL设置排序: ${newUrl}`);
+                window.location.href = newUrl;
+                await waitForPageLoad();
+                await waitForSearchResults();
+                console.log('✅ URL排序参数已设置');
+            } else {
+                console.log('✅ URL已包含正确的排序参数');
+            }
+            
+            // 点击"图文"标签（备用方案）
             await clickImageTab();
             
             // 滚动加载更多内容
@@ -458,6 +486,113 @@
     }
 
     /**
+     * 点击"最多点赞"排序选项
+     */
+    async function clickMostLikedSort() {
+        return new Promise((resolve) => {
+            console.log('🏆 尝试点击"最多点赞"排序选项...');
+            
+            // 记录点击前的URL，用于验证排序是否生效
+            const urlBefore = window.location.href;
+            console.log(`📍 排序前URL: ${urlBefore}`);
+            
+            // 等待页面稳定
+            setTimeout(() => {
+                // 查找"最多点赞"排序选项
+                // 根据小红书页面结构，排序选项通常在右侧边栏
+                let sortOptions = null;
+                
+                // 方法1：通过文本查找
+                const allElements = Array.from(document.querySelectorAll('*'));
+                for (const el of allElements) {
+                    const text = el.textContent || el.innerText || '';
+                    // 更精确的匹配：只匹配完全包含"最多点赞"的元素
+                    if (text.trim() === '最多点赞' || text.includes('最多点赞')) {
+                        const tagName = el.tagName.toLowerCase();
+                        if (tagName === 'button' || tagName === 'a' || tagName === 'div' || tagName === 'span' || tagName === 'li') {
+                            // 确保元素可见且可点击
+                            const rect = el.getBoundingClientRect();
+                            if (rect.width > 0 && rect.height > 0) {
+                                // 检查是否在排序区域（通常在右侧边栏）
+                                const parent = el.closest('[class*="sort"], [class*="filter"], [class*="sidebar"], [class*="aside"]');
+                                if (parent || rect.left > window.innerWidth * 0.6) {
+                                    sortOptions = el;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (sortOptions) {
+                    // 滚动到元素可见位置
+                    sortOptions.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    
+                    setTimeout(() => {
+                        try {
+                            // 尝试多种点击方式
+                            try {
+                                sortOptions.click();
+                                console.log('✅ 已点击"最多点赞"排序选项（方式1：直接点击）');
+                            } catch (error) {
+                                // 如果直接点击失败，尝试触发事件
+                                const clickEvent = new MouseEvent('click', {
+                                    bubbles: true,
+                                    cancelable: true,
+                                    view: window
+                                });
+                                sortOptions.dispatchEvent(clickEvent);
+                                console.log('✅ 已点击"最多点赞"排序选项（方式2：事件触发）');
+                            }
+                            
+                            // 等待排序结果加载（增加等待时间）
+                            console.log('⏳ 等待排序结果加载...');
+                            setTimeout(() => {
+                                // 验证排序是否生效
+                                const urlAfter = window.location.href;
+                                console.log(`📍 排序后URL: ${urlAfter}`);
+                                
+                                // 检查URL参数或页面状态
+                                const urlParams = new URLSearchParams(window.location.search);
+                                const sortParam = urlParams.get('sort') || urlParams.get('order');
+                                
+                                // 检查排序按钮是否有active状态
+                                const sortButtons = Array.from(document.querySelectorAll('*')).filter(el => {
+                                    const text = el.textContent || el.innerText || '';
+                                    return text.includes('最多点赞');
+                                });
+                                
+                                const hasActiveSort = sortButtons.some(btn => {
+                                    const classes = btn.className || '';
+                                    return classes.includes('active') || classes.includes('selected') || classes.includes('current');
+                                });
+                                
+                                if (hasActiveSort || sortParam || urlAfter !== urlBefore) {
+                                    console.log('✅ 排序验证成功');
+                                } else {
+                                    console.warn('⚠️ 排序验证未通过，但继续执行');
+                                }
+                                
+                                // 额外等待，确保排序结果完全加载
+                                console.log('⏳ 额外等待排序结果完全加载...');
+                                setTimeout(resolve, 3000);
+                            }, 5000);
+                        } catch (error) {
+                            console.warn('⚠️ 点击"最多点赞"排序选项失败:', error.message);
+                            console.log('💡 提示：如果搜索结果质量不佳，可能需要手动在小红书页面点击"最多点赞"排序');
+                            resolve();
+                        }
+                    }, 1000);
+                } else {
+                    console.log('⚠️ 未找到"最多点赞"排序选项，继续使用默认排序');
+                    console.log('💡 提示：如果搜索结果质量不佳，可能需要手动在小红书页面点击"最多点赞"排序');
+                    resolve();
+                }
+            }, 3000);
+        });
+    }
+
+    /**
      * 滚动加载更多内容
      */
     async function scrollToLoadMore() {
@@ -502,6 +637,62 @@
                 return false;
             }
             
+            /**
+             * 检查图片是否应该被过滤掉
+             */
+            function shouldFilterImage(img, src) {
+                const width = img.naturalWidth || img.width || 0;
+                const height = img.naturalHeight || img.height || 0;
+                
+                // 基本尺寸检查
+                const isLargeEnough = width > 200 && height > 200;
+                if (!isLargeEnough) {
+                    return true; // 过滤掉
+                }
+                
+                // URL关键词检查
+                const urlLower = src.toLowerCase();
+                const isAvatar = urlLower.includes('avatar') || 
+                                urlLower.includes('icon') || 
+                                urlLower.includes('profile') ||
+                                urlLower.includes('head') ||
+                                urlLower.includes('user');
+                const isSystem = urlLower.includes('logo') || 
+                                urlLower.includes('banner') || 
+                                urlLower.includes('button');
+                const isPerson = urlLower.includes('person') || 
+                                urlLower.includes('people') ||
+                                urlLower.includes('selfie') ||
+                                urlLower.includes('portrait') ||
+                                urlLower.includes('face') ||
+                                urlLower.includes('headshot');
+                
+                if (isAvatar || isSystem || isPerson) {
+                    return true; // 过滤掉
+                }
+                
+                // 尺寸比例检查（排除正方形小图标）
+                const aspectRatio = width > 0 && height > 0 ? width / height : 1;
+                const isSquareIcon = aspectRatio > 0.9 && aspectRatio < 1.1 && width < 200 && height < 200;
+                if (isSquareIcon) {
+                    return true; // 过滤掉
+                }
+                
+                // DOM结构检查（排除头像容器中的图片）
+                const isInIconContainer = img.closest('.avatar, .icon, .user-icon, .profile-pic, [class*="avatar"], [class*="user-head"]');
+                if (isInIconContainer) {
+                    return true; // 过滤掉
+                }
+                
+                // 检查是否在内容区域
+                const isInContentArea = img.closest('.note-item, .feed-item, .content-item, .note-card, .search-item, .result-item, article, .card');
+                if (!isInContentArea) {
+                    return true; // 过滤掉
+                }
+                
+                return false; // 保留
+            }
+            
             // 查找所有图片元素
             const images = document.querySelectorAll('img[src*="xiaohongshu"], img[src*="xhscdn"], .note-item img, .feed-item img, article img');
             
@@ -522,6 +713,11 @@
                 if (src && (src.includes('http') || src.startsWith('//'))) {
                     if (src.startsWith('//')) {
                         src = 'https:' + src;
+                    }
+                    
+                    // 应用过滤规则
+                    if (shouldFilterImage(img, src)) {
+                        continue; // 跳过这张图片
                     }
                     
                     // 检查是否来自食物相关的笔记
