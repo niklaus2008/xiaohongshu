@@ -79,13 +79,72 @@
     }
 
     /**
+     * 智能构建搜索关键词
+     * 考虑餐馆名称中的地址信息和门店信息，避免重复
+     * @param {string} restaurantName - 餐馆名称（可能包含地址信息）
+     * @param {string} location - 地点信息
+     * @returns {string} 优化后的搜索关键词
+     */
+    function buildSearchKeyword(restaurantName, location) {
+        // 门店相关关键词，用于识别门店信息
+        const storeKeywords = ['店', '门店', '分店', '路', '街', '区', '市', '省', '广场', '中心', '大厦', '商场'];
+        
+        // 提取餐馆名称中的地址信息
+        let nameParts = restaurantName.trim();
+        let locationParts = location ? location.trim() : '';
+        
+        // 如果location为空或已在餐馆名称中包含，则只使用餐馆名称
+        if (!locationParts || nameParts.includes(locationParts)) {
+            // 餐馆名称已包含地址信息，直接使用
+            return nameParts;
+        }
+        
+        // 检查餐馆名称中是否包含门店关键词
+        const nameHasStoreInfo = storeKeywords.some(keyword => nameParts.includes(keyword));
+        const locationHasStoreInfo = storeKeywords.some(keyword => locationParts.includes(keyword));
+        
+        // 如果餐馆名称中已有门店信息，优先使用餐馆名称，location作为补充
+        if (nameHasStoreInfo) {
+            // 餐馆名称已包含门店信息，将location作为补充（如果location包含更多信息）
+            // 提取location中的关键信息（去除与name重复的部分）
+            const locationWords = locationParts.split(/[\s，,、]/).filter(word => word.length > 0);
+            const nameWords = nameParts.split(/[\s，,、]/).filter(word => word.length > 0);
+            
+            // 找出location中不重复的关键词
+            const uniqueLocationWords = locationWords.filter(word => 
+                !nameWords.some(nameWord => nameWord.includes(word) || word.includes(nameWord))
+            );
+            
+            if (uniqueLocationWords.length > 0) {
+                return `${nameParts} ${uniqueLocationWords.join(' ')}`;
+            }
+            return nameParts;
+        } else if (locationHasStoreInfo) {
+            // location包含门店信息，组合使用
+            return `${nameParts} ${locationParts}`;
+        } else {
+            // 两者都没有明显的门店信息，组合使用
+            return `${nameParts} ${locationParts}`;
+        }
+    }
+
+    /**
      * 处理搜索请求
      */
     async function handleSearch(data) {
         const { restaurantName, location } = data;
-        const searchKeyword = location ? `${restaurantName} ${location}` : restaurantName;
         
-        console.log('开始搜索:', searchKeyword);
+        // 智能构建搜索关键词，考虑门店信息
+        let searchKeyword = buildSearchKeyword(restaurantName, location);
+        
+        // 如果关键词中不包含食物相关词汇，则添加"食物"关键词
+        const foodKeywords = ['食物', '美食', '菜品', '菜', '吃', '美食推荐', '美食探店'];
+        const hasFoodKeyword = foodKeywords.some(keyword => searchKeyword.includes(keyword));
+        if (!hasFoodKeyword) {
+            searchKeyword = `${searchKeyword} 食物`;
+        }
+        
+        console.log('开始搜索（已考虑门店信息）:', searchKeyword);
         
         try {
             // 构建搜索URL
@@ -396,18 +455,39 @@
 
     /**
      * 提取图片URL
+     * 优先提取笔记内容包含食物关键词的图片
      */
     function extractImageUrls(maxImages) {
         return new Promise((resolve) => {
+            // 食物相关关键词，用于识别食物相关的笔记
+            const foodKeywords = ['食物', '美食', '菜品', '菜', '吃', '美食推荐', '美食探店', '餐厅', '料理', '菜谱', '味道', '口感', '推荐', '好吃', '美味'];
+            
+            /**
+             * 检查元素或其父元素是否包含食物关键词
+             */
+            function containsFoodKeyword(element) {
+                // 向上查找笔记容器（通常包含标题和内容）
+                let container = element;
+                for (let i = 0; i < 5 && container; i++) {
+                    const text = container.textContent || container.innerText || '';
+                    const hasFoodKeyword = foodKeywords.some(keyword => text.includes(keyword));
+                    if (hasFoodKeyword) {
+                        return true;
+                    }
+                    container = container.parentElement;
+                }
+                return false;
+            }
+            
             // 查找所有图片元素
             const images = document.querySelectorAll('img[src*="xiaohongshu"], img[src*="xhscdn"], .note-item img, .feed-item img, article img');
             
             const imageUrls = [];
+            const foodImageUrls = []; // 优先的食物图片
             const seenUrls = new Set();
             
+            // 第一遍：优先提取食物相关的图片
             for (const img of images) {
-                if (imageUrls.length >= maxImages) break;
-                
                 let src = img.src || img.getAttribute('data-src') || img.getAttribute('data-original');
                 
                 if (!src || seenUrls.has(src)) continue;
@@ -420,16 +500,33 @@
                     if (src.startsWith('//')) {
                         src = 'https:' + src;
                     }
-                    imageUrls.push(src);
+                    
+                    // 检查是否来自食物相关的笔记
+                    if (containsFoodKeyword(img)) {
+                        foodImageUrls.push(src);
+                    } else {
+                        imageUrls.push(src);
+                    }
                     seenUrls.add(src);
                 }
             }
             
+            // 合并结果：优先使用食物图片，不足时补充其他图片
+            const finalImageUrls = [];
+            // 先添加食物相关图片
+            for (let i = 0; i < foodImageUrls.length && finalImageUrls.length < maxImages; i++) {
+                finalImageUrls.push(foodImageUrls[i]);
+            }
+            // 再添加其他图片直到达到最大数量
+            for (let i = 0; i < imageUrls.length && finalImageUrls.length < maxImages; i++) {
+                finalImageUrls.push(imageUrls[i]);
+            }
+            
             // 如果图片数量不足，尝试其他选择器
-            if (imageUrls.length < maxImages) {
+            if (finalImageUrls.length < maxImages) {
                 const moreImages = document.querySelectorAll('img');
                 for (const img of moreImages) {
-                    if (imageUrls.length >= maxImages) break;
+                    if (finalImageUrls.length >= maxImages) break;
                     
                     let src = img.src || img.getAttribute('data-src');
                     if (!src || seenUrls.has(src)) continue;
@@ -440,13 +537,14 @@
                         if (src.startsWith('//')) {
                             src = 'https:' + src;
                         }
-                        imageUrls.push(src);
+                        finalImageUrls.push(src);
                         seenUrls.add(src);
                     }
                 }
             }
             
-            resolve(imageUrls);
+            console.log(`提取图片完成: 总共${finalImageUrls.length}张，其中食物相关${foodImageUrls.length}张`);
+            resolve(finalImageUrls);
         });
     }
 

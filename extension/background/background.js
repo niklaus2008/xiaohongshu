@@ -734,6 +734,56 @@ async function handleStartDownload(data) {
 }
 
 /**
+ * 智能构建搜索关键词
+ * 考虑餐馆名称中的地址信息和门店信息，避免重复
+ * @param {string} restaurantName - 餐馆名称（可能包含地址信息）
+ * @param {string} location - 地点信息
+ * @returns {string} 优化后的搜索关键词
+ */
+function buildSearchKeyword(restaurantName, location) {
+    // 门店相关关键词，用于识别门店信息
+    const storeKeywords = ['店', '门店', '分店', '路', '街', '区', '市', '省', '广场', '中心', '大厦', '商场'];
+    
+    // 提取餐馆名称中的地址信息
+    let nameParts = restaurantName ? restaurantName.trim() : '';
+    let locationParts = location ? location.trim() : '';
+    
+    // 如果location为空或已在餐馆名称中包含，则只使用餐馆名称
+    if (!locationParts || nameParts.includes(locationParts)) {
+        // 餐馆名称已包含地址信息，直接使用
+        return nameParts;
+    }
+    
+    // 检查餐馆名称中是否包含门店关键词
+    const nameHasStoreInfo = storeKeywords.some(keyword => nameParts.includes(keyword));
+    const locationHasStoreInfo = storeKeywords.some(keyword => locationParts.includes(keyword));
+    
+    // 如果餐馆名称中已有门店信息，优先使用餐馆名称，location作为补充
+    if (nameHasStoreInfo) {
+        // 餐馆名称已包含门店信息，将location作为补充（如果location包含更多信息）
+        // 提取location中的关键信息（去除与name重复的部分）
+        const locationWords = locationParts.split(/[\s，,、]/).filter(word => word.length > 0);
+        const nameWords = nameParts.split(/[\s，,、]/).filter(word => word.length > 0);
+        
+        // 找出location中不重复的关键词
+        const uniqueLocationWords = locationWords.filter(word => 
+            !nameWords.some(nameWord => nameWord.includes(word) || word.includes(nameWord))
+        );
+        
+        if (uniqueLocationWords.length > 0) {
+            return `${nameParts} ${uniqueLocationWords.join(' ')}`;
+        }
+        return nameParts;
+    } else if (locationHasStoreInfo) {
+        // location包含门店信息，组合使用
+        return `${nameParts} ${locationParts}`;
+    } else {
+        // 两者都没有明显的门店信息，组合使用
+        return `${nameParts} ${locationParts}`;
+    }
+}
+
+/**
  * 处理下载队列
  */
 async function processDownloadQueue(config) {
@@ -763,8 +813,16 @@ async function processDownloadQueue(config) {
             
             // 检查是否在小红书页面
             if (!tab.url.includes('xiaohongshu.com')) {
+                // 智能构建搜索关键词，考虑门店信息
+                let searchKeyword = buildSearchKeyword(restaurant.name, restaurant.location);
+                // 如果关键词中不包含食物相关词汇，则添加"食物"关键词
+                const foodKeywords = ['食物', '美食', '菜品', '菜', '吃', '美食推荐', '美食探店'];
+                const hasFoodKeyword = foodKeywords.some(keyword => searchKeyword.includes(keyword));
+                if (!hasFoodKeyword) {
+                    searchKeyword = `${searchKeyword} 食物`;
+                }
                 // 打开小红书搜索页面
-                const searchUrl = `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(restaurant.name + (restaurant.location ? ' ' + restaurant.location : ''))}&type=51`;
+                const searchUrl = `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(searchKeyword)}&type=51`;
                 const newTab = await chrome.tabs.create({ url: searchUrl });
                 
                 // 等待页面加载
